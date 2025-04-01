@@ -13,12 +13,15 @@
             "sim": false,
             "default_voltage": -80,
             "default_current": 5e-6
-        }
-    },
+	}
+   
+   	 },
     "channels_dict":{
         "0":{
             "lv": {"instrument":"lv_1", "channel":1},
             "hv": {"instrument":"hv", "channel":1}
-        }
+
+	
+	}
     }
 }

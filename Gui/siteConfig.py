@@ -38,7 +38,7 @@ defaultDBName = 'cmsfpix_phase2'
 
 ##################################
 
-
+#/dev/ttyUSB2 - Prolific_Technology_Inc._USB-Serial_Controller_DQAWs11CN11
 
 #default BaudRate for Arduino sensor
 defaultSensorBaudRate = 9600
@@ -46,7 +46,7 @@ defaultArduino = "Arduino SA Uno R3 (CDC ACM) ACM0"
 
 #UIC coldbox variables
 usePeltier = False
-defaultPeltierPort = '/dev/ttyUSBPeltier'
+defaultPeltierPort = '/dev/ttyUSB4'
 defaultPeltierBaud = 9600
 defaultPeltierSetTemp = 10
 defaultPeltierWarningTemp = 40
@@ -58,9 +58,30 @@ defaultPeltierWarningTemp = 40
 # IF THIS VARIABLE IS SET, THEN ICICLE_INSTRUMENT_SETUP WILL NOT BE USED
 manual_powersupply_control = False
 
+icicle_instrument_setup = { "lv":"KeysightE3633A", #Choices are: KeysightE3633A, HMP4040, TTI
+                           "lv_resource" : "ASRL/dev/ttyUSBLV::INSTR",
+                           "default_lv_channel" : 1,
+                           "default_lv_voltage" : 1.8, #in volts
+                           "default_lv_current" : 3, #in amps
+                           "hv": "Keithley2410", #Choices are: Keithley2410
+                           "hv_resource": "ASRL/dev/ttyUSBHV::INSTR",
+                           "default_hv_voltage": -80, #in volts
+                           "default_hv_compliance_current": 5e-6, #in amps
+                           "default_hv_delay": 1, #in seconds
+                           "default_hv_step_size": 10, #in volts
+                          # "adc_board": "AdcBoard",
+                          # "adc_board_resource": "ASRL/dev/ttyUSB2::INSTR"
+                          # "relay_board": "RelayBoard", #Choices are RelayBoard
+                          # "relay_board_resource": "ASRL/dev/ttyUSB0::INSTR",
+          
+                           #"multimeter": "HP34401A", #Choices are HP34401A, Keithley2000
+                           #"multimeter_resource": "ASRL/dev/ttyUSBMM::INSTR",
+
+                             }
+
 # Load instrument setup from json file
-with open('jsonFiles/instruments.json', 'r') as file:
-    icicle_instrument_setup = json.load(file)
+with open('jsonFiles/instruments_osu_oneLV.json', 'r') as file:
+   icicle_instrument_setup = json.load(file)
 
 #Set peak voltage for bias scan.  Make sure this value is negative or it could damage the sensor.
 IVcurve_range = -80 #Maximum voltage in Volts to be used in IVcurve
@@ -87,8 +108,8 @@ Monitor_SleepTime = "30000"  # time in milliseconds between temperature readings
 
 ## Establish thresholds for chip temperature readings. A chip reading above the
 ## emergency threshold will abort the test.
-Warning_Threshold = 25
-Emergency_Threshold = 40
+#Warning_Threshold = 25
+#Emergency_Threshold = 40
 
 ## Configuring the current settings for each module type.  These values are in Amps. 
 ModuleCurrentMap = {
@@ -104,6 +125,9 @@ ModuleCurrentMap = {
 	"TBPX CROC 1x2"  : 4.5,
 	"TBPX CROC Quad" : 7.5,
 }
+
+defaultPeltierPort = '/dev/ttyUSB4'
+## Configuring the voltage limit for each module type when operating in SLDO mode.  These values are in Volts.
 
 ## Configuring the voltage limit for each module type when operating in SLDO mode.  These values are in Volts.
 ModuleVoltageMapSLDO = {

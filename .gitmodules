@@ -5,7 +5,7 @@
 [submodule "icicle"]
 	path = icicle
 	url = https://gitlab.cern.ch/icicle/icicle.git
-	branch = new_adc_board_v2
+	branch = osudev
 [submodule "InnerTrackerTests"]
 	path = InnerTrackerTests
 	url = https://gitlab.cern.ch/cms_tk_ph2/inner-tracker-tests.git

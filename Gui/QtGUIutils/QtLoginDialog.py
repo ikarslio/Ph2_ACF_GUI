@@ -1,50 +1,24 @@
-from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
-#from PyQt5.QtGui import QPixmap
+
+# from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
     QCheckBox,
     QComboBox,
-    QDateTimeEdit,
-    QDial,
     QDialog,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QProgressBar,
     QPushButton,
-    QRadioButton,
-    QScrollBar,
-    QSizePolicy,
-    QSlider,
-    QSpinBox,
-    QStyleFactory,
-    QTableView,
-    QTableWidget,
-    QTabWidget,
-    QTextEdit,
-    QHBoxLayout,
-    QVBoxLayout,
-    QWidget,
-    QMainWindow,
     QMessageBox,
-    QSplitter,
 )
 
-import sys
-import os
-import subprocess
-from subprocess import Popen, PIPE
 
-from Gui.GUIutils.settings import dblist
+# from Gui.GUIutils.settings import dblist
 from Gui.GUIutils.DBConnection import (
     QtStartConnection,
     isActive,
 )
-from Gui.python.logging_config import logger
 
 
 class QtLoginDialog(QDialog):
@@ -84,8 +58,8 @@ class QtLoginDialog(QDialog):
 
         if not self.expertMode:
             self.HostName = QComboBox()
-            self.HostName.addItems(dblist)
-            self.HostName.currentIndexChanged.connect(self.changeDBList)
+            # self.HostName.addItems(dblist)
+            # self.HostName.currentIndexChanged.connect(self.changeDBList)
             HostLabel.setBuddy(self.HostName)
         else:
             self.HostEdit = QLineEdit("128.146.38.1")

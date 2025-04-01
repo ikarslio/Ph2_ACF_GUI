@@ -21,16 +21,13 @@ from PyQt5.QtWidgets import (
 
 from Gui.QtGUIutils.QtRunWindow import QtRunWindow
 from Gui.GUIutils.FirmwareUtil import fwStatusParser
-from Gui.python.CustomizedWidget import SimpleBeBoardBox, SimpleModuleBox
+from Gui.python.CustomizedWidget import SimpleBeBoardBox
 from Gui.python.Firmware import QtBeBoard
-from Gui.GUIutils.DBConnection import checkDBConnection
-import Gui.GUIutils.settings as default_settings
 from Gui.python.ArduinoWidget import ArduinoWidget
 from Gui.python.Peltier import PeltierSignalGenerator
 from Gui.python.logging_config import logger
 import Gui.siteSettings as site_settings
-from icicle.icicle.multiment_cluster import InstrumentCluster, InstrumentNotInstantiated
-
+from icicle.icicle.instrument_cluster import InstrumentNotInstantiated
 
 
 class SimplifiedMainWidget(QWidget):
@@ -42,14 +39,14 @@ class SimplifiedMainWidget(QWidget):
         super().__init__()
         self.master = master
         self.dimension = dimension
-        
+
         try:
             self.instruments = master.instruments
         except SerialException:
             instrument_warning_message = QMessageBox()
             instrument_warning_message.setIcon(QMessageBox.Critical)
             instrument_warning_message.setInformativeText(
-                    """
+                """
                     Your instruments could not be
                     connected! Check siteConfig.py
                     to make sure you have set the
@@ -75,10 +72,10 @@ class SimplifiedMainWidget(QWidget):
         self.createWindow()
 
     def setupBeBoard(self):
-        #self.BeBoard.setFPGAConfig(default_settings.FPGAConfigList[site_settings.defaultFC7])
-        #logger.debug(f"Default FC7: {site_settings.defaultFC7}")
+        # self.BeBoard.setFPGAConfig(default_settings.FPGAConfigList[site_settings.defaultFC7])
+        # logger.debug(f"Default FC7: {site_settings.defaultFC7}")
         logger.debug("Initialized BeBoard in SimplifiedGUI")
-        self.BeBoardWidget = SimpleBeBoardBox(self.firmware)
+        self.BeBoardWidget = SimpleBeBoardBox(self.master, self.firmware)
         logger.debug("Initialized SimpleBeBoardBox in Simplified GUI")
 
     def setupArduino(self):
@@ -93,7 +90,9 @@ class SimplifiedMainWidget(QWidget):
 
     def setupLogFile(self):
         for firmwareName in site_settings.FC7List.keys():
-            LogFileName = "{0}/Gui/.{1}.log".format(os.environ.get("GUI_dir"), firmwareName)
+            LogFileName = "{0}/Gui/.{1}.log".format(
+                os.environ.get("GUI_dir"), firmwareName
+            )
             logger.debug(f"FC7 log file saved to {LogFileName}")
 
             try:
@@ -108,7 +107,7 @@ class SimplifiedMainWidget(QWidget):
 
     def setupPeltier(self):
         try:
-            self.instrument_info["peltier"] = {"Label" : QLabel(), "Value" : QLabel()}
+            self.instrument_info["peltier"] = {"Label": QLabel(), "Value": QLabel()}
             self.instrument_info["peltier"]["Label"].setText("Peltier Temperature")
             logger.debug("Setting up Peltier")
             self.Peltier = PeltierSignalGenerator()
@@ -119,7 +118,8 @@ class SimplifiedMainWidget(QWidget):
                 self.Peltier.createCommand(
                     "Set Type Define Write", ["0", "0", "0", "0", "0", "0", "0", "0"]
                 )
-            )[1]: raise Exception("Could not communicate with Peltier")
+            )[1]:
+                raise Exception("Could not communicate with Peltier")
             logger.debug("Execute Peltier write command")
 
             # Allows set point to be set by computer software
@@ -127,31 +127,42 @@ class SimplifiedMainWidget(QWidget):
                 self.Peltier.createCommand(
                     "Control Type Write", ["0", "0", "0", "0", "0", "0", "0", "1"]
                 )
-            )[1]: raise Exception("Could not communicate with Peltier") # Temperature should be PID controlled
+            )[1]:
+                raise Exception(
+                    "Could not communicate with Peltier"
+                )  # Temperature should be PID controlled
             logger.debug("Executed Peltier PID command")
 
-            message = self.Peltier.convertSetTempValueToList(site_settings.defaultPeltierSetTemp)
+            message = self.Peltier.convertSetTempValueToList(
+                site_settings.defaultPeltierSetTemp
+            )
 
             self.Peltier.sendCommand(
-                self.Peltier.createCommand("Fixed Desired Control Setting Write", message)
+                self.Peltier.createCommand(
+                    "Fixed Desired Control Setting Write", message
+                )
             )
             logger.debug("Set peltier temp")
             if not self.Peltier.sendCommand(
                 self.Peltier.createCommand(
                     "Power On/Off Write", ["0", "0", "0", "0", "0", "0", "0", "1"]
                 )
-            )[1]: raise Exception("Could not communicate with Peltier")   # Turn on Peltier
+            )[1]:
+                raise Exception("Could not communicate with Peltier")  # Turn on Peltier
             logger.debug("Turned off Peltier")
             if not self.Peltier.sendCommand(
                 self.Peltier.createCommand(
                     "Proportional Bandwidth Write",
                     ["0", "0", "0", "0", "0", "0", "c", "8"],
                 )
-            )[1]: raise Exception("Could not communicate with Peltier")  # Set proportional bandwidth
+            )[1]:
+                raise Exception(
+                    "Could not communicate with Peltier"
+                )  # Set proportional bandwidth
             logger.debug("Set Peltier Bandwidth")
             time.sleep(0.5)
 
-            self.peltier_temperature_label = QLabel(self) 
+            self.peltier_temperature_label = QLabel(self)
         except Exception as e:
             print("Error while attempting to set Peltier", e)
             self.Peltier = None
@@ -159,8 +170,12 @@ class SimplifiedMainWidget(QWidget):
     def setupStatusWidgets(self):
         logger.debug("Set device status")
         self.StatusLayout = QGridLayout()
-        self.StatusLayout.addWidget(self.instrument_info["database"]["Label"], 0, 1, 1, 1)
-        self.StatusLayout.addWidget(self.instrument_info["database"]["Value"], 0, 2, 1, 1)
+        self.StatusLayout.addWidget(
+            self.instrument_info["database"]["Label"], 0, 1, 1, 1
+        )
+        self.StatusLayout.addWidget(
+            self.instrument_info["database"]["Value"], 0, 2, 1, 1
+        )
         self.StatusLayout.addWidget(self.instrument_info["hv"]["Label"], 0, 3, 1, 1)
         self.StatusLayout.addWidget(self.instrument_info["hv"]["Value"], 0, 4, 1, 1)
 
@@ -168,60 +183,92 @@ class SimplifiedMainWidget(QWidget):
         self.StatusLayout.addWidget(self.instrument_info["lv"]["Value"], 1, 2, 1, 1)
         offset = -1
         for index, firmwareName in enumerate(site_settings.FC7List.keys()):
-            self.StatusLayout.addWidget(self.instrument_info[f"fc7_{firmwareName}"]["Label"], 1+index, 3, 1, 1)
-            self.StatusLayout.addWidget(self.instrument_info[f"fc7_{firmwareName}"]["Value"], 1+index, 4, 1, 1)
+            self.StatusLayout.addWidget(
+                self.instrument_info[f"fc7_{firmwareName}"]["Label"], 1 + index, 3, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.instrument_info[f"fc7_{firmwareName}"]["Value"], 1 + index, 4, 1, 1
+            )
             offset += 1
 
-        self.StatusLayout.addWidget(self.instrument_info["arduino"]["Label"], 2, 1, 1, 1)
-        self.StatusLayout.addWidget(self.instrument_info["arduino"]["Value"], 2, 2, 1, 1)
+        self.StatusLayout.addWidget(
+            self.instrument_info["arduino"]["Label"], 2, 1, 1, 1
+        )
+        self.StatusLayout.addWidget(
+            self.instrument_info["arduino"]["Value"], 2, 2, 1, 1
+        )
         if self.Peltier:
-            self.StatusLayout.addWidget(self.instrument_info["peltier"]["Label"], 2+offset, 3, 1, 1)
-            self.StatusLayout.addWidget(self.instrument_info["peltier"]["Value"], 2+offset, 4, 1, 1)
-            self.StatusLayout.addWidget(self.peltier_temperature_label, 3+offset, 3, 1, 1)
+            self.StatusLayout.addWidget(
+                self.instrument_info["peltier"]["Label"], 2 + offset, 3, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.instrument_info["peltier"]["Value"], 2 + offset, 4, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.peltier_temperature_label, 3 + offset, 3, 1, 1
+            )
         self.RefreshButton = QPushButton("&Refresh")
         self.RefreshButton.clicked.connect(self.setDeviceStatus)
-        self.StatusLayout.addWidget(self.RefreshButton, 3+offset, 3, 1, 1)
+        self.StatusLayout.addWidget(self.RefreshButton, 3 + offset, 3, 1, 1)
         logger.debug("Setup StatusLayout")
 
     def setupUI(self):
-
         self.StatusLayout = QGridLayout()
-        self.StatusLayout.addWidget(self.instrument_info["database"]["Label"], 0, 1, 1, 1)
-        self.StatusLayout.addWidget(self.instrument_info["database"]["Value"], 0, 2, 1, 1)
+        self.StatusLayout.addWidget(
+            self.instrument_info["database"]["Label"], 0, 1, 1, 1
+        )
+        self.StatusLayout.addWidget(
+            self.instrument_info["database"]["Value"], 0, 2, 1, 1
+        )
         self.StatusLayout.addWidget(self.instrument_info["hv"]["Label"], 0, 3, 1, 1)
         self.StatusLayout.addWidget(self.instrument_info["hv"]["Value"], 0, 4, 1, 1)
 
         self.StatusLayout.addWidget(self.instrument_info["lv"]["Label"], 1, 1, 1, 1)
         self.StatusLayout.addWidget(self.instrument_info["lv"]["Value"], 1, 2, 1, 1)
-        
+
         offset = -1
         for index, firmwareName in enumerate(site_settings.FC7List.keys()):
-            self.StatusLayout.addWidget(self.instrument_info[f"fc7_{firmwareName}"]["Label"], 1+index, 3, 1, 1)
-            self.StatusLayout.addWidget(self.instrument_info[f"fc7_{firmwareName}"]["Value"], 1+index, 4, 1, 1)
+            self.StatusLayout.addWidget(
+                self.instrument_info[f"fc7_{firmwareName}"]["Label"], 1 + index, 3, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.instrument_info[f"fc7_{firmwareName}"]["Value"], 1 + index, 4, 1, 1
+            )
             offset += 1
 
-        self.StatusLayout.addWidget(self.instrument_info["arduino"]["Label"], 2, 1, 1, 1)
-        self.StatusLayout.addWidget(self.instrument_info["arduino"]["Value"], 2, 2, 1, 1)
+        self.StatusLayout.addWidget(
+            self.instrument_info["arduino"]["Label"], 2, 1, 1, 1
+        )
+        self.StatusLayout.addWidget(
+            self.instrument_info["arduino"]["Value"], 2, 2, 1, 1
+        )
         if self.Peltier:
-            self.StatusLayout.addWidget(self.instrument_info["peltier"]["Label"], 2+offset, 3, 1, 1)
-            self.StatusLayout.addWidget(self.instrument_info["peltier"]["Value"], 2+offset, 4, 1, 1)
-            self.StatusLayout.addWidget(self.peltier_temperature_label, 3+offset, 3, 1, 1)
-        #self.StatusLayout.addWidget(self.RefreshButton, 3, 3, 1, 1)
+            self.StatusLayout.addWidget(
+                self.instrument_info["peltier"]["Label"], 2 + offset, 3, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.instrument_info["peltier"]["Value"], 2 + offset, 4, 1, 1
+            )
+            self.StatusLayout.addWidget(
+                self.peltier_temperature_label, 3 + offset, 3, 1, 1
+            )
+        # self.StatusLayout.addWidget(self.RefreshButton, 3, 3, 1, 1)
         logger.debug("Setup StatusLayout")
         ModuleEntryLayout = QGridLayout()
         ModuleEntryLayout.addWidget(self.BeBoardWidget)
         logger.debug("Setup ModuleEntryLayout")
 
-
         self.AppOption = QGroupBox()
         self.StartLayout = QHBoxLayout()
         self.TestGroup = QGroupBox()
         self.TestGroupLayout = QVBoxLayout()
-        self.ProductionButton = QRadioButton("&Full Test")
-        self.QuickButton = QRadioButton("&Quick Test")
-        self.QuickButton.setChecked(True)
-        self.TestGroupLayout.addWidget(self.QuickButton)
-        self.TestGroupLayout.addWidget(self.ProductionButton)
+        self.FunctionTestButton = QRadioButton("&Functional Test")
+        self.AssemblyTestButton = QRadioButton("&Assembly QC Test")
+        self.FullPerformanceTestButton = QRadioButton("&Full Performance Test")
+        self.FunctionTestButton.setChecked(True)
+        self.TestGroupLayout.addWidget(self.FunctionTestButton)
+        self.TestGroupLayout.addWidget(self.AssemblyTestButton)
+        self.TestGroupLayout.addWidget(self.FullPerformanceTestButton)
 
         self.TestGroup.setLayout(self.TestGroupLayout)
         logger.debug("Added Boxes/Layouts to Simplified GUI")
@@ -291,7 +338,9 @@ class SimplifiedMainWidget(QWidget):
         logger.debug("Simplied GUI UI Loaded")
 
     def createWindow(self):
-        self.simplifiedStatusBox = QGroupBox("Hello, {}!".format(self.master.operator_name_first))
+        self.simplifiedStatusBox = QGroupBox(
+            "Hello, {}!".format(self.master.operator_name_first)
+        )
 
         self.instrument_info["database"] = {"Label": QLabel(), "Value": QLabel()}
         self.instrument_info["database"]["Label"].setText("Database connection:")
@@ -303,33 +352,35 @@ class SimplifiedMainWidget(QWidget):
         self.instrument_info["lv"]["Label"].setText("LV status")
 
         for firmwareName in site_settings.FC7List.keys():
-            self.instrument_info[f"fc7_{firmwareName}"] = {"Label": QLabel(), "Value": QLabel()}
+            self.instrument_info[f"fc7_{firmwareName}"] = {
+                "Label": QLabel(),
+                "Value": QLabel(),
+            }
             self.instrument_info[f"fc7_{firmwareName}"]["Label"].setText(firmwareName)
 
-        self.setupLogFile() 
+        self.setupLogFile()
         self.setupArduino()
         if site_settings.usePeltier:
             self.setupPeltier()
         else:
             self.Peltier = None
-        self.setDeviceStatus() 
+        self.setDeviceStatus()
         self.setupBeBoard()
-        #self.setupStatusWidgets()
+        # self.setupStatusWidgets()
         self.setupUI()
 
     def updateArduinoIndicator(self):
-        if(self.ArduinoGroup.condensationRisk):
+        if self.ArduinoGroup.condensationRisk:
             self.instrument_info["arduino"]["Value"].setPixmap(self.redledpixmap)
         else:
             self.instrument_info["arduino"]["Value"].setPixmap(self.greenledpixmap)
 
-    def updatePeltierTemp(self, temp:float):
+    def updatePeltierTemp(self, temp: float):
         self.peltier_temperature_label.setText("{}C".format(temp))
         if abs(temp - site_settings.defaultPeltierSetTemp) < 15:
             self.instrument_info["peltier"]["Value"].setPixmap(self.greenledpixmap)
-        else: 
+        else:
             self.instrument_info["peltier"]["Value"].setPixmap(self.redledpixmap)
-
 
     def runNewTest(self):
         for module in self.BeBoardWidget.getModules():
@@ -343,7 +394,9 @@ class SimplifiedMainWidget(QWidget):
                 return
 
         self.firmwareDescription, message = self.BeBoardWidget.getFirmwareDescription()
-        if not self.firmwareDescription: #firmware description returns none if no modules are entered
+        if (
+            not self.firmwareDescription
+        ):  # firmware description returns none if no modules are entered
             QMessageBox.information(
                 None,
                 "Error",
@@ -351,30 +404,34 @@ class SimplifiedMainWidget(QWidget):
                 QMessageBox.Ok,
             )
             return
-        
-        if self.ProductionButton.isChecked():
-            self.info = "ROCTune"
-        else:
-            self.info = "QuickTest"
+
+        if self.FunctionTestButton.isChecked():
+            self.info = "TFPX_Functional_Test"
+        elif self.AssemblyTestButton.isChecked():
+            self.info = "TFPX_Assembly_QC"
+        elif self.FullPerformanceTestButton.isChecked():
+            self.info = "TFPX_FullPerformance_Test"
         self.runFlag = True
         self.RunTest = QtRunWindow(self.master, self.info, self.firmwareDescription)
         self.RunButton.setDisabled(True)
         self.StopButton.setDisabled(False)
 
         self.RunTest.resetConfigTest()
-        
+
         module = self.firmwareDescription[0].getModules()[0]
         module_type = module.getModuleType()
         self.master.module_in_use = module_type
-        
+
         print("Firmware Description")
         for beboard in self.firmwareDescription:
             print(beboard)
-        
+
         print("Firmware Check")
         for beboard in self.firmwareDescription:
-            fw_check = SummaryBox.checkFwPar(beboard.getBoardName(), module_type, beboard.getIPAddress())
-        
+            SummaryBox.checkFwPar(
+                beboard.getBoardName(), module_type, beboard.getIPAddress()
+            )
+
         self.RunTest.initialTest()
         # self.RunTest.runTest()
 
@@ -391,36 +448,40 @@ class SimplifiedMainWidget(QWidget):
         The qualifications for a passing status are
         HV  -> HV is on and connected as stated by InstrumentCluster.status()
         LV  -> LV is on and connected as stated by InstrumentCluster.status()
-        Arduino -> Can read correctly from the Arduino sensor as defined in ArduinoWidget.py 
+        Arduino -> Can read correctly from the Arduino sensor as defined in ArduinoWidget.py
         Database -> Check if you can connect to database as defined in checkDBConnection()
-        Peltier -> check if the Peltier is at the right temperature and is reachable 
-        """ 
+        Peltier -> check if the Peltier is at the right temperature and is reachable
+        """
 
-        #self.instrument_status = self.check_icicle_devices()
+        # self.instrument_status = self.check_icicle_devices()
         self.instrument_status = {
             "arduino": False,
-            "fc7_1": False,
-            "fc7_2": False,
             "database": False,
             "hv": False,
             "lv": False,
-            "peltier": site_settings.usePeltier
+            "peltier": site_settings.usePeltier,
         }
-        #logger.debug(f"Instrument status is {self.instrument_status}")
+
+        for firmwareName in site_settings.FC7List.keys():
+            self.instrument_status[f"fc7_{firmwareName}"] = False
+            self.instrument_status[f"fc7_{firmwareName}"] = False
+        # logger.debug(f"Instrument status is {self.instrument_status}")
 
         logger.debug("Getting FC7 Comment")
         self.firmware = []
         for firmwareName, ipaddress in site_settings.FC7List.items():
-            LogFileName = "{0}/Gui/.{1}.log".format(os.environ.get("GUI_dir"), firmwareName)
+            LogFileName = "{0}/Gui/.{1}.log".format(
+                os.environ.get("GUI_dir"), firmwareName
+            )
             BeBoard = QtBeBoard(
                 BeBoardID=str(len(self.firmware)),
                 boardName=firmwareName,
-                ipAddress=ipaddress
+                ipAddress=ipaddress,
             )
             FwStatusComment, _, _ = fwStatusParser(BeBoard, LogFileName)
             if FwStatusComment == "Connected":
                 self.firmware.append(BeBoard)
-        
+
         logger.debug("Checking DB Connection")
 
         # Launch QThread to monitor Peltier temperature/power and Arduino temperature/humidity
@@ -435,32 +496,32 @@ class SimplifiedMainWidget(QWidget):
 
         logger.debug("Setting up instrument_status")
         logger.debug("instrument_status: {}".format(self.instrument_status))
-        logger.debug("instruments: ".format(self.instruments))
-       
+        logger.debug("instruments: ")
+
         self.instrument_status["arduino"] = self.ArduinoGroup.ArduinoGoodStatus
         for beboard in self.firmware:
             self.instrument_status[f"fc7_{beboard.getBoardName()}"] = True
-        self.instrument_status["database"] = self.master.database_connected
+        self.instrument_status["database"] = self.master.panthera_connected
 
         # Icicle will deal with the powersupplies, so I will just always set their status to good
-        # Technically a false sense of security for the user. 
+        # Technically a false sense of security for the user.
         self.instrument_status["hv"] = True
         self.instrument_status["lv"] = True
         if site_settings.usePeltier:
             self.instrument_status["peltier"] = False
         if self.instruments:
-            logger.debug(f'{__name__} Setup instrument status {self.instrument_status}')
+            logger.debug(f"{__name__} Setup instrument status {self.instrument_status}")
             for key, value in self.instrument_info.items():
-                if self.instrument_status[key]:  
+                if self.instrument_status[key]:
                     value["Value"].setPixmap(self.greenledpixmap)
                 else:
                     value["Value"].setPixmap(self.redledpixmap)
         else:
             for key, value in self.instrument_info.items():
                 value["Value"].setPixmap(self.redledpixmap)
-        logger.debug(f'{__name__} Setup led labels')
+        logger.debug(f"{__name__} Setup led labels")
 
-    def check_icicle_devices(self) ->Optional[dict[str, int]]:
+    def check_icicle_devices(self) -> Optional[dict[str, int]]:
         """
         Check if LV, HV, and relay board are connected and communicable
 
@@ -470,7 +531,7 @@ class SimplifiedMainWidget(QWidget):
         this part the HV and LV should always have a good status and we need to
         invert the values from instrument_cluster.status()
         """
-        try: 
+        try:
             status = self.instruments.status(lv_channel=1)
         except RuntimeError:
             error_box = QMessageBox()
@@ -481,19 +542,19 @@ class SimplifiedMainWidget(QWidget):
                 as stated in siteConfig.py in the icicle_instrument_setup
                 dictionary. 
                 """
-                )
+            )
             error_box.setIcon(QMessageBox.Critical)
             error_box.setStandardButtons(QMessageBox.Ok)
             error_box.exec()
             self.destroySimplified()
         logger.debug(f"Status of instrument_cluster instruments: {status}")
-        return_status = {} 
+        return_status = {}
         for key, value in status.items():
             if value == 0:
                 return_status[key] = 1
-            elif type(value) == InstrumentNotInstantiated:
+            elif type(value) is InstrumentNotInstantiated:
                 return_status[key] = 0
-        return return_status        
+        return return_status
 
     def retryLogin(self):
         self.master.mainLayout.removeWidget(self)
@@ -513,31 +574,47 @@ class SimplifiedMainWidget(QWidget):
 class Worker_Polling(QObject):
     temp = pyqtSignal(float)
     power = pyqtSignal(bool)
+
     def __init__(self):
         super().__init__()
         # Delay in seconds between polling
         self.delay = 0.5
         self.abort = False
+
     def run(self):
-        while not self.abort and site_settings.usePeltier: 
+        while not self.abort and site_settings.usePeltier:
             self.Peltier = PeltierSignalGenerator()
-            peltier_power_status = 1 if int(self.Peltier.sendCommand(self.Peltier.createCommand("Power On/Off Read", ["0", "0"]))[-1]) == 1 else 0
-            peltier_temp_message, temp_message_pass = self.Peltier.sendCommand(self.Peltier.createCommand("Input1",  ["0", "0", "0", "0", "0", "0", "0", "0"]))
+            peltier_power_status = (
+                1
+                if int(
+                    self.Peltier.sendCommand(
+                        self.Peltier.createCommand("Power On/Off Read", ["0", "0"])
+                    )[-1]
+                )
+                == 1
+                else 0
+            )
+            peltier_temp_message, temp_message_pass = self.Peltier.sendCommand(
+                self.Peltier.createCommand(
+                    "Input1", ["0", "0", "0", "0", "0", "0", "0", "0"]
+                )
+            )
             if not temp_message_pass:
                 peltier_temp_message = None
             logger.debug("Formatting peltier output")
             if peltier_temp_message:
-                peltier_temp = int("".join(peltier_temp_message[1:9]), 16)/100
+                peltier_temp = int("".join(peltier_temp_message[1:9]), 16) / 100
             else:
                 peltier_temp = None
 
             self.temp.emit(peltier_temp)
             self.power.emit(peltier_power_status)
             time.sleep(self.delay)
-        
+
         while not self.abort:
             self.temp.emit(0.0)
             time.sleep(self.delay)
+
     def abort_worker(self):
         print("Worker aborted")
         self.abort = True

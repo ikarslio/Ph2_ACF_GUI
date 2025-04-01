@@ -21,20 +21,8 @@ GPIB_DebugMode = False
 
 ##  The following block sets defaults that are to be used in the simplified (non-expert) mode.  ##
 
-# default FC7 boardName
-defaultFC7 = "fc7.board.1"
-# default IP address of IP address
-defaultFC7IP = '192.168.1.80'
-# default FMC board number
-defaultFMC = 'L12'
 # default mode for LV powering (Direct,SLDO,etc)
 defaultPowerMode = "SLDO"
-#default DBServerIP
-#defaultDBServerIP = '127.0.0.1'
-defaultDBServerIP = 'cmsfpixdb.physics.purdue.edu'
-#default DBName
-#defaultDBName = 'SampleDB'
-defaultDBName = 'cmsfpix_phase2'
 
 ##################################
 
@@ -44,13 +32,27 @@ defaultDBName = 'cmsfpix_phase2'
 defaultSensorBaudRate = 9600
 defaultArduino = "Arduino SA Uno R3 (CDC ACM) ACM0"
 
+<<<<<<< HEAD
 #UIC coldbox variables
 usePeltier = False
 defaultPeltierPort = '/dev/ttyUSB4'
+=======
+#Coldbox variables
+cooler = "Tessie" # "Pelter", "Tessie", or "Manual"
+usePeltier = False #The "cooler" variable will be used in the future, but this line is needed for the current version of the GUI
+
+defaultPeltierPort = '/dev/ttyUSBPeltier'
+>>>>>>> 937c2421c42d06c22e5a618647e21d6de6129960
 defaultPeltierBaud = 9600
 defaultPeltierSetTemp = 10
 defaultPeltierWarningTemp = 40
 #################################
+
+# Temperature Chamber Variables
+# Only UIC and OSU should be setting this variable. This is to control
+# the f4t thermal chamber (this is NOT the same as the UIC coldbox used for standard
+# module testing!)
+#temp_chamber_resource = "TCPIP::128.146.33.179::5025::SOCKET"
 
 # Icicle variables
 
@@ -81,10 +83,17 @@ icicle_instrument_setup = { "lv":"KeysightE3633A", #Choices are: KeysightE3633A,
 
 # Load instrument setup from json file
 with open('jsonFiles/instruments_osu_oneLV.json', 'r') as file:
+<<<<<<< HEAD
    icicle_instrument_setup = json.load(file)
+=======
+    icicle_instrument_setup = json.load(file)
+>>>>>>> 937c2421c42d06c22e5a618647e21d6de6129960
 
 #Set peak voltage for bias scan.  Make sure this value is negative or it could damage the sensor.
-IVcurve_range = -80 #Maximum voltage in Volts to be used in IVcurve
+IVcurve_range = {
+    "IVCurve" 		: 	-80, #Maximum voltage in Volts to be used in IVcurve prior to Parylene coating
+	"IVCurve_300"	:	-20 #Maximum voltage in Volts to be used in IVcurve after Parylene coating
+}
 
 forward_bias_voltage = 0.5 #positive voltage used to run a forward-reverse bias bump bond test
 

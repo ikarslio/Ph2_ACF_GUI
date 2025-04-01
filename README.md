@@ -40,6 +40,12 @@ Open the file siteConfig.py in your favorite text editor and go to the "Icicle v
 
 In the JSON file, you can set the model of LV/HV devices, specify USB ports, etc. You should only include instruments that you have connected. For example, if you do not have a relay board or a digital multimeter, you should not list those in the JSON.
 
+> [!TIP]
+> We highly suggest setting up udev rules for your hardware devices. This provides two benefits. One is that you will be able to easily refer to each of your devices
+> in the json file. The second, is that linux does not guarantee that your devices are always mounted to the same path upon reboot without the use of udev rules. This means that without udev rules after a computer reboot, the GUI is liable
+> to stop working and will require a manual change of your hardware pathing. For a guide on how to setup udev rules for your hardware, please see the following tutorial given at one of our IT-DAQ collaborations: [udev rules](https://codimd.web.cern.ch/s/HvKK3gQCp#).
+>NOTE: The alias needs to begin with ttyUSB in order to work with the GUI correctly. 
+
 For every instrument you wish to connect, you must make a separate entry in the 'instrument_dict' section of the JSON. In the example below, there is is one LV power supply, one HV power supply, a relay board, and a multimeter. Each of these has a corresponding entry in 'instrument_dict' detailing its model (listed as "class"), resource, default voltage, and default current. There is another attribute, "sim," which represents whether the device is simulated or not. This should be false for nearly all use cases. Devices that do not have a voltage or current, such as a relay board, multimeter, or adc board, should be set to 0 as a default.
 
 The next section in the JSON is titled 'channels_dict.' This category is responsible for linking your power supply channels to the GUI. For each LV/HV pair, you need one entry in this section. For each entry, you need to specify the LV and the HV contained in it. To do this, you set up the dictionary with two keys, one for your LV and the other for the corresponding HV. You then associate that with an 'instrument' and a 'channel.' The 'instrument' tag corresponds to the physical instrument listed in 'instrument_dict.' For example, the LV in our instrument dict is titled "lv_1," so we name our instrument in 'channels_dict' "lv_1." The channel then corresponds the which specific channel on that instrument you are interested in using.
@@ -55,7 +61,23 @@ In Gui/jsonFiles, there are example files written that may be modified to suit y
 Returning to Gui/siteConfig.py, you should also scroll down to the "FC7List" and edit the fc7.board.* listed there to match the IP addresses of your FC7 device(s).
 
 If you scroll down a little further, you will see a dictionary titled "CableMapping." This serves as a mapping of the cable ID you see when adding modules in the simplified GUI to a physical port on your FC7(s). Each cable ID is associated with a dictionary detailing the path to a port. The first key, "FC7," specifies which FC7 that you want that cable ID to be connected to. The FC7 you list should be in the FC7List above. Next, you can name the "FMCID," representing which FMC on the FC7 you wish to use. The possible values for this are "L8" if the FMC is on the left or "L12" if the FMC is on the right. Finally, you can specify which port on that FMC you want to connect to. The leftmost port is "0" and the rightmost port is "3."
+#### Temperature Chamber
+This section only applies to UIC and OSU who have the f4t thermal
+chamber for thermal cycling of the modules (This is NOT the same thing
+as the UIC coldbox used for standard module testing!). You can add
+control of the thermal chamber to the GUI by adding in
+temp_chamber_resource to the siteConfig.py file. 
 
+``` python
+temp_chamber_resource = "TCPIP::<ip_address>::SOCKET"
+```
+where ip_address is the ip address of your thermal chamber which can
+   be obtained through the settings menu on the f4t controller on the
+   thermal chamber. This will allow you to select your thermal profile
+   from the GUI and to stop the running of the profile from the GUI as
+   well. A thermal profile must be loaded on the thermal chamber prior
+   to using it with the GUI. 
+   
 3. Start the docker container:
 ```
 cd ..
@@ -99,7 +121,7 @@ bash run_Docker.sh dev
 5. Set up Ph2_ACF and open GUI:
 When you first open the container you should run
 ```
-source prepare_Ph2_ACF
+source prepare_Ph2ACF.sh
 ```
 This will set up the Ph2_ACF environment variables in the container and open the GUI.  If you exit the GUI, it will take you back to the Gui directory.  If you want to open the GUI again while still inside the container, you can just run
 ```
@@ -198,3 +220,68 @@ run the command
 ```
 xhost +local:
 ```
+
+# Transferring F4T Temperature Controller Data Logs with TFTP
+The F4T Temperature Controller can transfer its data logs via USB, Samba, or Trivial File Transfer Protocol (TFTP). Here are steps to set up a TFTP server on your Linux machine and have the F4T automatically send data logs to the server. Note this tutorial does not use the commonly used xinetd daemon.
+### Creating the Server
+1. On your hosting machine, install the `tftp-server` and `tftp` packages
+
+`dnf install tftp-server`
+
+`dnf install tftp`
+
+3. You may have to make the TFTP service file or it may already exist `mkdir /etc/systemd/system/tftp.service`
+4. Edit the TFTP service file `nano /etc/systemd/system/tftp.service`
+5. Add the following lines
+```
+[Unit]
+        Description = Tftp Server
+        Requires = tftp.socket
+        Documentation=man:in.tftpd
+
+[Service]
+        ExecStart=/usr/sbin/in.tftpd -c /path/to/data/logs/destination
+        StandardInput=socket
+
+[Install]
+        Also=tftp.socket
+```
+5. You may have to make the TFTP socket file or it may already exist `mkdir /etc/systemd/system/tftp.socket`
+6. Edit the TFTP socket file `nano /etc/systemd/system/tftp.socket`
+7. Add the following lines
+```
+[Unit]
+        Description=TFTP Server Activation Socket
+
+[Socket]
+        ListenDatagram=69
+        SocketMode=0666
+        BindIPv6Only=both
+
+[Install]
+        WantedBy=sockets.target
+```
+8. To employ your changes, run `systemctl daemon-reload`
+9. Now start your tftp server `systemctl start tftp`
+10. You can check the status of your tftp server by running `systemctl status tftp`
+### Sending the Data Logs
+**Note: The default TFTP username is "admin" and the default TFTP password is "1234"**
+1. On the F4T (GUI version 04:07:0012), navigate to Main Menu > Data Logging > Data Log File Transfer
+2. Enter the following credentials:
+
+   Auto Transfer Type: TFTP
+
+   Samba User Name: admin
+
+   Samba Password: 1234
+
+   Samba Path: /path/to/data/logs/destination
+
+   Remote Host Name: TFTP Server host's IPv4
+
+   Remote IP Address: TFTP Server host's IPv4 (same as Remote Host Name)
+
+4. You can test your setup with "Transfer Files Now By" section and selecting "TFTP"
+
+* If the GUI doens't launch and an error stating a QT plugin could not be used even though it was found, reboot your computer. This seems to be an issue with the QT framework that the GUI is written with and we have yet to determine a fix. 
+

@@ -3,10 +3,8 @@ from PyQt5.QtGui import QPixmap, QColor, QImage
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
-    QDialog,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
@@ -16,28 +14,26 @@ from PyQt5.QtWidgets import (
     QWidget,
     QMessageBox,
     QSplitter,
+    QProgressBar,
+    QApplication,
 )
 
 import os
+import numpy as np
 import threading
-import time
-import logging
+import Gui.siteSettings as site_settings
 
-from Gui.GUIutils.DBConnection import checkDBConnection
-from Gui.GUIutils.guiUtils import isActive, isCompositeTest
+from Gui.GUIutils.guiUtils import isCompositeTest
+from Gui.QtGUIutils.Loading import LoadingThread, LoadingWheel
 
-# from Gui.QtGUIutils.QtStartWindow import *
 from Gui.QtGUIutils.QtCustomizeWindow import QtCustomizeWindow
-#from Gui.QtGUIutils.QtTableWidget import *
-#from Gui.QtGUIutils.QtMatplotlibUtils import *
-from Gui.QtGUIutils.QtLoginDialog import QtLoginDialog
+
+# from Gui.QtGUIutils.QtTableWidget import *
+# from Gui.QtGUIutils.QtMatplotlibUtils import *
 from Gui.python.ResultTreeWidget import ResultTreeWidget
-#from Gui.python.TestValidator import *
-#from Gui.python.ANSIColoringParser import *
 from Gui.python.TestHandler import TestHandler
-from Gui.GUIutils.settings import ModuleLaneMap
 from Gui.python.logging_config import logger
-from InnerTrackerTests.TestSequences import CompositeTests, Test_to_Ph2ACF_Map
+from InnerTrackerTests.TestSequences import CompositeTests
 
 
 class QtRunWindow(QWidget):
@@ -53,25 +49,24 @@ class QtRunWindow(QWidget):
         self.info = info
 
         # Removing for sequencefix
-#        if "AllScan_Tuning" in self.info:
-#            runTestList = pretuningList
-#            runTestList.extend(tuningList * len(defaultTargetThr))
-#            runTestList.extend(posttuningList)
-#            CompositeList.update({"AllScan_Tuning": runTestList})
+        #        if "AllScan_Tuning" in self.info:
+        #            runTestList = pretuningList
+        #            runTestList.extend(tuningList * len(defaultTargetThr))
+        #            runTestList.extend(posttuningList)
+        #            CompositeList.update({"AllScan_Tuning": runTestList})
 
         self.ModuleMap = dict()
-        self.ModuleType = self.firmware[0].getModuleData()['type']
+        self.ModuleType = self.firmware[0].getModuleData()["type"]
 
         self.RunNumber = "-1"
 
         # Add TestProcedureHandler
         self.testHandler = TestHandler(self, master, info, firmware)
-        assert self.master.instruments is not None, logger.error("Unable to setup instruments")
-        self.testHandler.powerSignal.connect(
-            lambda: self.master.instruments.off(
-                hv_delay=0.3, hv_step_size=10, measure=False
+        if not site_settings.manual_powersupply_control:
+            assert self.master.instruments is not None, logger.error(
+                "Unable to setup instruments"
             )
-        )
+            self.testHandler.powerSignal.connect(self.onPowerSignal)
 
         self.GroupBoxSeg = [1, 10, 1]
         self.HorizontalSeg = [3, 5]
@@ -81,7 +76,6 @@ class QtRunWindow(QWidget):
         self.DisplayW = self.width() * 3.0 / 7
 
         self.processingFlag = False
-        self.ProgressBarList = []
         self.input_dir = ""
         self.output_dir = ""
         self.config_file = (
@@ -105,48 +99,57 @@ class QtRunWindow(QWidget):
         # Fixme: QTimer to be added to update the page automatically
         self.grades = []
         self.modulestatus = []
+        self.finished_tests = []
         self.autoSave = False
 
         self.mainLayout = QGridLayout()
         self.setLayout(self.mainLayout)
 
         self.ledMap = {
-            "off": QPixmap.fromImage(QImage("icons/led-off.png").scaled(
-                QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            "off": QPixmap.fromImage(
+                QImage("icons/led-off.png").scaled(
+                    QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
             ),
-            "green": QPixmap.fromImage(QImage("icons/led-green-on.png").scaled(
-                QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            "green": QPixmap.fromImage(
+                QImage("icons/led-green-on.png").scaled(
+                    QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
             ),
-            "orange": QPixmap.fromImage(QImage("icons/led-amber-on.png").scaled(
-                QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            "orange": QPixmap.fromImage(
+                QImage("icons/led-amber-on.png").scaled(
+                    QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
             ),
-            "red": QPixmap.fromImage(QImage("icons/led-red-on.png").scaled(
-                QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            "red": QPixmap.fromImage(
+                QImage("icons/led-red-on.png").scaled(
+                    QSize(60, 30), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
             ),
         }
-        
+
         self.setLoginUI()
         # self.initializeRD53Dict()
         self.createHeadLine()
-        self.createMain()
         self.createApp()
+        self.createMain()
         self.occupied()
 
         self.resized.connect(self.rescaleImage)
 
-        # added from Bowen
-        #self.j = 0
-        # stepWiseGlobalValue[0]['TargetThr'] = defaultTargetThr[0]
-        # if len(runTestList)>1:
-        #for i in range(len(runTestList)):
-        #    if runTestList[i] == "ThresholdAdjustment":
-        #        self.j += 1
-        #    if self.j == 0:
-        #        stepWiseGlobalValue[i]["TargetThr"] = defaultTargetThr[self.j]
-        #    else:
-        #        stepWiseGlobalValue[i]["TargetThr"] = defaultTargetThr[self.j - 1]
-
-        #logger.info(stepWiseGlobalValue)
+    def onPowerSignal(self):
+        starting_voltages = [
+            np.abs(getattr(module["hv"], "voltage"))
+            for module in self.master.instruments._module_dict.values()
+        ]
+        self.master.instruments.off(
+            hv_delay=0.3,
+            hv_step_size=10,
+            measure=False,
+            execute_each_step=lambda: self.testHandler.ramp_progress_bar(
+                starting_voltages
+            ),
+        )
 
     def setLoginUI(self):
         X = self.master.dimension.width() / 10
@@ -164,12 +167,10 @@ class QtRunWindow(QWidget):
 
         self.HeadLayout = QHBoxLayout()
 
-        HeadLabel = QLabel(
-            '<font size="4"> Test: {0} </font>'.format(self.info)
-        )
+        HeadLabel = QLabel('<font size="4"> Test: {0} </font>'.format(self.info))
         HeadLabel.setMaximumHeight(30)
 
-        colorString = "color: green" if self.master.database_connected else "color: red"
+        colorString = "color: green" if self.master.panthera_connected else "color: red"
         StatusLabel = QLabel()
         StatusLabel.setText(self.master.operator_name)
         StatusLabel.setStyleSheet(f"{colorString}; font-size: 14px")
@@ -192,11 +193,6 @@ class QtRunWindow(QWidget):
 
         mainbodylayout = QHBoxLayout()
 
-        kMinimumWidth = 120
-        kMaximumWidth = 150
-        kMinimumHeight = 30
-        kMaximumHeight = 80
-
         # Splitters
         MainSplitter = QSplitter(Qt.Horizontal)
         LeftColSplitter = QSplitter(Qt.Vertical)
@@ -218,37 +214,20 @@ class QtRunWindow(QWidget):
         self.RunButton.setDefault(True)
         self.RunButton.clicked.connect(self.resetConfigTest)
         self.RunButton.clicked.connect(self.initialTest)
-        # self.RunButton.clicked.connect(self.runTest)
-        # self.ContinueButton = QPushButton("&Continue")
-        # self.ContinueButton.clicked.connect(self.sendProceedSignal)
+        self.RunButton.clicked.connect(lambda: self.RunButton.setDisabled(True))
         self.AbortButton = QPushButton("&Abort")
         self.AbortButton.clicked.connect(self.abortTest)
-        # self.SaveButton = QPushButton("&Save")
-        # self.SaveButton.clicked.connect(self.saveTest)
         self.saveCheckBox = QCheckBox("&auto-save to Panthera")
         self.saveCheckBox.setMaximumHeight(30)
-        if self.master.database_connected:
+        if self.master.panthera_connected:
             self.saveCheckBox.setChecked(self.testHandler.autoSave)
             self.saveCheckBox.clicked.connect(self.setAutoSave)
         else:
             self.testHandler.autoSave = False
             self.saveCheckBox.setChecked(False)
             self.saveCheckBox.setDisabled(True)
-        # if not isActive(self.connection):
-        #     self.saveCheckBox.setChecked(False)
-        #     self.testHandler.autoSave = False
-        #     self.saveCheckBox.setDisabled(True)
-        
-        ##### previous layout ##########
-        """
 
-		self.ControlLayout.addWidget(self.CustomizedButton,0,0,1,2)
-		self.ControlLayout.addWidget(self.ResetButton,0,2,1,1)
-		self.ControlLayout.addWidget(self.RunButton,1,0,1,1)
-		self.ControlLayout.addWidget(self.AbortButton,1,1,1,1)
-		self.ControlLayout.addWidget(self.saveCheckBox,1,2,1,1)
-		"""
-        if self.master.expertMode == True:
+        if self.master.expertMode:
             self.ControlLayout.addWidget(self.RunButton, 0, 0, 1, 1)
             self.ControlLayout.addWidget(self.AbortButton, 0, 1, 1, 1)
             self.ControlLayout.addWidget(self.ResetButton, 0, 2, 1, 1)
@@ -256,14 +235,10 @@ class QtRunWindow(QWidget):
 
         else:
             pass
-        # 	self.ControlLayout.addWidget(self.RunButton,0,0,1,1)
-        # 	self.ControlLayout.addWidget(self.AbortButton,0,1,1,1)
-        # 	self.saveCheckBox.setDisabled(True)
-        # 	self.ControlLayout.addWidget(self.saveCheckBox,0,2,1,1)
 
         ControllerBox.setLayout(self.ControlLayout)
 
-        # Group Box for ternimal display
+        # Group Box for terminal display
         TerminalBox = QGroupBox("&Terminal")
         TerminalSP = TerminalBox.sizePolicy()
         TerminalSP.setVerticalStretch(self.VerticalSegCol0[1])
@@ -272,15 +247,16 @@ class QtRunWindow(QWidget):
 
         ConsoleLayout = QGridLayout()
 
-        self.ConsoleView = QPlainTextEdit()
-        self.ConsoleView.setStyleSheet(
-            "QTextEdit { background-color: rgb(10, 10, 10); color : white; }"
-        )
-        # self.ConsoleView.setCenterOnScroll(True)
-        self.ConsoleView.ensureCursorVisible()
-        self.ConsoleView.setReadOnly(True)
+        self.ConsoleViews = [QPlainTextEdit() for i in range(len(self.firmware))]
+        for i in range(len(self.ConsoleViews)):
+            self.ConsoleViews[i].setStyleSheet(
+                "QTextEdit { background-color: rgb(10, 10, 10); color : white; }"
+            )
+            self.ConsoleViews[i].ensureCursorVisible()
+            self.ConsoleViews[i].setReadOnly(True)
+            ConsoleLayout.addWidget(QLabel(self.firmware[i].getBoardName()), 0, i)
+            ConsoleLayout.addWidget(self.ConsoleViews[i], 1, i)
 
-        ConsoleLayout.addWidget(self.ConsoleView)
         TerminalBox.setLayout(ConsoleLayout)
 
         # Group Box for output display
@@ -330,11 +306,29 @@ class QtRunWindow(QWidget):
         self.TempLayout.addWidget(self.tempIndicator, 1, 1, 1, 1)
         self.TempBox.setLayout(self.TempLayout)
 
+        self.RampBox = QGroupBox()
+        self.RampLayout = QGridLayout()
+        self.RampProgressBars = [QProgressBar()] * len(
+            self.master.instruments._module_dict.values()
+        )
+        RampProgressLabels = [QLabel("Bias Voltage:")] * len(
+            self.master.instruments._module_dict.values()
+        )
+        for label in RampProgressLabels:
+            label.setStyleSheet("font-weight: bold;")
+
+        for i in range(len(self.master.instruments._module_dict.values())):
+            self.RampLayout.addWidget(RampProgressLabels[i], i, 0, 1, 1)
+            self.RampLayout.addWidget(self.RampProgressBars[i], i, 1, 1, 1)
+        self.RampBox.setLayout(self.RampLayout)
+
         LeftColSplitter.addWidget(ControllerBox)
         LeftColSplitter.addWidget(TerminalBox)
+        LeftColSplitter.addWidget(self.RampBox)
         LeftColSplitter.addWidget(self.TempBox)
         RightColSplitter.addWidget(OutputBox)
         RightColSplitter.addWidget(self.HistoryBox)
+        RightColSplitter.addWidget(self.AppOption)
 
         LeftColSplitterSP = LeftColSplitter.sizePolicy()
         LeftColSplitterSP.setHorizontalStretch(self.HorizontalSeg[0])
@@ -348,10 +342,6 @@ class QtRunWindow(QWidget):
         MainSplitter.addWidget(RightColSplitter)
 
         mainbodylayout.addWidget(MainSplitter)
-        # mainbodylayout.addWidget(ControllerBox, sum(self.VerticalSegCol0[:0]), sum(self.HorizontalSeg[:0]), self.VerticalSegCol0[0], self.HorizontalSeg[0])
-        # mainbodylayout.addWidget(TerminalBox, sum(self.VerticalSegCol0[:1]), sum(self.HorizontalSeg[:0]), self.VerticalSegCol0[1], self.HorizontalSeg[0])
-        # mainbodylayout.addWidget(OutputBox, sum(self.VerticalSegCol1[:0]), sum(self.HorizontalSeg[:1]), self.VerticalSegCol1[0], self.HorizontalSeg[1])
-        # mainbodylayout.addWidget(HistoryBox, sum(self.VerticalSegCol1[:1]), sum(self.HorizontalSeg[:1]), self.VerticalSegCol1[1], self.HorizontalSeg[1])
 
         self.MainBodyBox.setLayout(mainbodylayout)
         self.mainLayout.addWidget(
@@ -367,12 +357,26 @@ class QtRunWindow(QWidget):
         self.MainBodyBox.deleteLater()
         self.mainLayout.removeWidget(self.MainBodyBox)
 
+    def upload_to_Panthera_starter(self):
+        self.UploadProgressBar = QProgressBar()
+        self.UploadWheel = LoadingWheel()
+        self.UploadProgressBar.setFormat(f"0/{len(self.testHandler.modules)} uploaded")
+        self.StartLayout.insertWidget(1, self.UploadProgressBar)
+        self.StartLayout.insertWidget(1, self.UploadWheel)
+        self.AppOption.repaint()
+
+        self.Panthera_thread = LoadingThread(self.testHandler.upload_to_Panthera, 50)
+        self.Panthera_thread.finished.connect(self.UploadWheel.close)
+        self.Panthera_thread.timer.timeout.connect(self.UploadWheel.update_spinner)
+        self.Panthera_thread.timer.start()
+        self.Panthera_thread.start()  # Start the thread
+
     def createApp(self):
         self.AppOption = QGroupBox()
         self.StartLayout = QHBoxLayout()
 
         self.UploadButton = QPushButton("&Upload Results")
-        self.UploadButton.clicked.connect(self.testHandler.upload_to_Panthera)
+        self.UploadButton.clicked.connect(self.upload_to_Panthera_starter)
         self.UploadButton.setDisabled(True)
 
         self.BackButton = QPushButton("&Back")
@@ -385,8 +389,9 @@ class QtRunWindow(QWidget):
         self.FinishButton.clicked.connect(self.closeWindow)
 
         self.StartLayout.addStretch(1)
-        if self.master.expertMode == True:
-            self.StartLayout.addWidget(self.UploadButton)
+
+        self.StartLayout.addWidget(self.UploadButton)
+
         self.StartLayout.addWidget(self.BackButton)
         self.StartLayout.addWidget(self.FinishButton)
         self.AppOption.setLayout(self.StartLayout)
@@ -415,30 +420,26 @@ class QtRunWindow(QWidget):
         self.LogoGroupBox.setLayout(self.LogoLayout)
 
         self.mainLayout.addWidget(
-            self.AppOption, sum(self.GroupBoxSeg[0:2]), 0, self.GroupBoxSeg[2], 1
-        )
-        self.mainLayout.addWidget(
             self.LogoGroupBox, sum(self.GroupBoxSeg[0:3]), 0, self.GroupBoxSeg[2], 1
         )
 
     def destroyApp(self):
         self.AppOption.deleteLater()
-        self.mainLayout.removeWidget(self.AppOption)
 
     def closeWindow(self):
         self.close()
 
     def creatStartWindow(self):
-        if self.backSignal == True and self.master.expertMode == True:
+        if self.backSignal and self.master.expertMode:
             self.master.openNewTest()
 
     def occupied(self):
         self.master.ProcessingTest = True
 
     def release(self):
-        self.abortTest()
+        self.testHandler.abortTest()
         self.master.ProcessingTest = False
-        if self.master.expertMode == True:
+        if self.master.expertMode:
             self.master.NewTestButton.setDisabled(False)
             self.master.LogoutButton.setDisabled(False)
             self.master.ExitButton.setDisabled(False)
@@ -455,13 +456,11 @@ class QtRunWindow(QWidget):
         print("attempting to update status in history")
         self.HistoryLayout.removeWidget(self.StatusTable)
         self.StatusTable.setRowCount(0)
-        for index, test_results in enumerate(self.modulestatus):
+        for test, test_results in zip(self.finished_tests, self.modulestatus):
             row = self.StatusTable.rowCount()
             self.StatusTable.setRowCount(row + 1)
             if isCompositeTest(self.info):
-                self.StatusTable.setItem(
-                    row, 0, QTableWidgetItem(CompositeTests[self.info][index % len(CompositeTests[self.info])])
-                )
+                self.StatusTable.setItem(row, 0, QTableWidgetItem(test))
             else:
                 self.StatusTable.setItem(row, 0, QTableWidgetItem(self.info))
             for module_result in test_results:
@@ -470,9 +469,7 @@ class QtRunWindow(QWidget):
                 moduleID = f"Module{moduleName}"
                 if moduleID in self.header:
                     columnID = self.header.index(moduleID)
-                    self.StatusTable.setItem(
-                        row, columnID, QTableWidgetItem(status)
-                    )
+                    self.StatusTable.setItem(row, columnID, QTableWidgetItem(status))
                     if status == "Pass":
                         self.StatusTable.item(row, columnID).setBackground(
                             QColor(Qt.green)
@@ -482,20 +479,23 @@ class QtRunWindow(QWidget):
                             QColor(Qt.red)
                         )
 
+        self.StatusTable.resizeColumnsToContents()
         self.HistoryLayout.addWidget(self.StatusTable)
 
     def displayTestResultPopup(self, item):
         try:
-            row = item.row() #row = index, they are aligned in refreshHistory()
+            row = item.row()  # row = index, they are aligned in refreshHistory()
             col = item.column()
-            message = self.modulestatus[row][self.header.index(self.header[col])-1][self.header[col].lstrip("Module")][1]
-        
+            message = self.modulestatus[row][self.header.index(self.header[col]) - 1][
+                self.header[col].lstrip("Module")
+            ][1]
+
             msg_box = QMessageBox()
             msg_box.setWindowTitle("Additional Information")
             msg_box.setText(message)
             msg_box.exec_()
         except KeyError as e:
-            if e.args[0] != 'TestName':
+            if e.args[0] != "TestName":
                 raise e
 
     def sendBackSignal(self):
@@ -534,8 +534,18 @@ class QtRunWindow(QWidget):
         self.testHandler.runTest(isReRun)
 
     def abortTest(self):
-        self.j = 0
-        self.testHandler.abortTest()
+        reply = QMessageBox.question(
+            None,
+            "Abort",
+            "Are you sure to abort?",
+            QMessageBox.No | QMessageBox.Yes,
+            QMessageBox.No,
+        )
+
+        if reply == QMessageBox.Yes:
+            self.testHandler.abortTest()
+        else:
+            return
 
     def urgentStop(self):
         self.testHandler.urgentStop()
@@ -571,10 +581,10 @@ class QtRunWindow(QWidget):
     ##  For real-time terminal display
     #######################################################################
 
-    def updateConsoleInfo(self, text):
-        textCursor = self.ConsoleView.textCursor()
-        self.ConsoleView.setTextCursor(textCursor)
-        self.ConsoleView.appendHtml(text)
+    def updateConsoleInfo(self, text: str, console: QPlainTextEdit):
+        textCursor = console.textCursor()
+        console.setTextCursor(textCursor)
+        console.appendHtml(text)
 
     def finish(self, EnableReRun):
         self.RunButton.setDisabled(True)
@@ -584,38 +594,49 @@ class QtRunWindow(QWidget):
         if EnableReRun:
             self.RunButton.setText("&Re-run")
             self.RunButton.setDisabled(False)
-            if self.master.database_connected:
+            if self.master.panthera_connected:
                 self.UploadButton.setDisabled(self.testHandler.autoSave)
 
     def updateResult(self, newResult):
-        # self.ResultWidget.updateResult("/Users/czkaiweb/Research/data")
         if self.master.expertMode:
             self.ResultWidget.updateResult(newResult)
         else:
-            #self.ResultWidget.updateResult(newResult)
             step, displayDict = newResult
             self.ResultWidget.updateDisplayList(step, displayDict)
 
     def updateIVResult(self, newResult):
-        # self.ResultWidget.updateResult("/Users/czkaiweb/Research/data")
         if self.master.expertMode:
             self.ResultWidget.updateIVResult(newResult)
         else:
             step, displayDict = newResult
             self.ResultWidget.updateDisplayList(step, displayDict)
 
-    def updateSLDOResult(self, newResult): 
+    def updateSLDOResult(self, newResult):
         if self.master.expertMode:
             self.ResultWidget.updateSLDOResult(newResult)
         else:
             step, displayDict = newResult
             self.ResultWidget.updateDisplayList(step, displayDict)
 
-    def updateValidation(self, results:list):
+    def updateValidation(self, results: list):
         try:
             self.modulestatus.append(results)
         except Exception as err:
             logger.error(err)
+
+    def updateFinishedTests(self, tests: list):
+        try:
+            self.finished_tests = tests
+        except Exception as err:
+            logger.error(err)
+
+    def updateProgressBar(self, bar: QProgressBar, value: int, text: str):
+        bar.setFormat(text)
+        bar.setValue(value)
+        QApplication.processEvents()  # So the "window not responding" popup doesn't appear
+        # QApplication.processEvents() is unideal though. It would have been better to
+        # run tests in a QThread, so we don't have to keep pinging the GUI.
+        # But ion finna make that happen.
 
     #######################################################################
     ##  For real-time terminal display
@@ -644,7 +665,7 @@ class QtRunWindow(QWidget):
         self.saveCheckBox.setChecked(self.testHandler.autoSave)
 
     def closeEvent(self, event):
-        if self.processingFlag == True:
+        if self.processingFlag:
             event.ignore()
 
         else:
@@ -659,15 +680,25 @@ class QtRunWindow(QWidget):
             if reply == QMessageBox.Yes:
                 self.release()
                 if self.master.instruments:
+                    starting_voltages = [
+                        np.abs(getattr(module["hv"], "voltage"))
+                        for module in self.master.instruments._module_dict.values()
+                    ]
                     self.master.instruments.off(
-                        hv_delay=0.3, hv_step_size=10
+                        hv_delay=0.3,
+                        hv_step_size=10,
+                        execute_each_step=lambda: self.testHandler.ramp_progress_bar(
+                            starting_voltages
+                        ),
                     )
                 else:
-                    QMessageBox.information(self, "Info", "You must turn off "
-                                            "instruments manually",
-                                            QMessageBox.Ok)
+                    QMessageBox.information(
+                        self,
+                        "Info",
+                        "You must turn off instruments manually",
+                        QMessageBox.Ok,
+                    )
                 event.accept()
             else:
                 self.backSignal = False
                 event.ignore()
-

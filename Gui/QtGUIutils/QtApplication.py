@@ -8,13 +8,11 @@ from PyQt5.QtWidgets import (
     QDialog,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QStyleFactory,
     QHBoxLayout,
-    QVBoxLayout,
     QWidget,
     QMessageBox,
 )
@@ -23,30 +21,29 @@ from PyQt5.QtWidgets import (
 import sys
 import os
 import pyvisa
+import requests
 from felis.felis_methods import get_accountInfo
-import requests.exceptions as rqx
 
-from Gui.GUIutils.DBConnection import QtStartConnection, checkDBConnection
-import Gui.GUIutils.settings as settings
+from Gui.QtGUIutils.Loading import LoadingWheel, LoadingThread
+
 import Gui.siteSettings as site_settings
 from Gui.GUIutils.FirmwareUtil import fwStatusParser, FwStatusCheck
-from Gui.GUIutils.guiUtils import isActive
+from Gui.QtGUIutils.LaudaApp import LaudaWidget
 from Gui.QtGUIutils.PeltierCoolingApp import Peltier
+from Gui.QtGUIutils.TessieCoolingApp import Tessie
 from Gui.QtGUIutils.QtFwCheckWindow import QtFwCheckWindow
 from Gui.QtGUIutils.QtFwStatusWindow import QtFwStatusWindow
 from Gui.QtGUIutils.QtSummaryWindow import QtSummaryWindow
 from Gui.QtGUIutils.QtStartWindow import QtStartWindow
 from Gui.QtGUIutils.QtProductionTestWindow import QtProductionTestWindow
 from Gui.QtGUIutils.QtModuleReviewWindow import QtModuleReviewWindow
-#from Gui.QtGUIutils.QtDBConsoleWindow import QtDBConsoleWindow #FIXME The imports from this module cause things to crash.
-
 from Gui.QtGUIutils.QtuDTCDialog import QtuDTCDialog
 from Gui.python.Firmware import QtBeBoard
 from Gui.python.ArduinoWidget import ArduinoWidget
 from Gui.python.SimplifiedMainWidget import SimplifiedMainWidget
-# from icicle.icicle.instrument_cluster import BadStatusForOperationError, InstrumentCluster
-from icicle.icicle.multiment_cluster import InstrumentCluster
 
+from icicle.icicle.instrument_cluster import InstrumentCluster
+from icicle.icicle.f4t_temperature_chamber import F4TTempChamber
 
 
 from Gui.python.logging_config import logger
@@ -54,6 +51,7 @@ from Gui.python.logging_config import logger
 
 class QtApplication(QWidget):
     globalStop = pyqtSignal()
+    errorMessageBoxSignal = pyqtSignal(str)
 
     def __init__(self, dimension):
         super(QtApplication, self).__init__()
@@ -64,6 +62,9 @@ class QtApplication(QWidget):
         self.ActiveFC7s = {}
         self.module_in_use = None
         self.instruments = None
+
+        self.relay = False
+        self.multimeter = False
 
         self.FwDict = {}
         self.FwStatusVerboseDict = {}
@@ -85,15 +86,20 @@ class QtApplication(QWidget):
             "multimeter": None,
         }
         logger.warning("Initialized variables for QtApplication")
-        print("Initialized variables for QtApplication")
-
-        # self.HVpowersupply = PowerSupply(powertype="HV", serverIndex=1)
-        # self.LVpowersupply = PowerSupply(powertype="LV", serverIndex=2)
-        # self.PowerRemoteControl = {"HV": True, "LV": True}
+        logger.debug("Initialized variables for QtApplication")
 
         self.setLoginUI()
         self.initLog()
         self.createLogin()
+
+        self.errorMessageBoxSignal.connect(
+            lambda message: QMessageBox.information(
+                None,
+                "Error",
+                message,
+                QMessageBox.Ok,
+            )
+        )
 
     def setLoginUI(self):
         self.setGeometry(300, 300, 400, 500)
@@ -104,42 +110,100 @@ class QtApplication(QWidget):
             or sys.platform.startswith("win")
             or sys.platform.startswith("darwin")
         ):
-            darkPalette = QPalette()
-            darkPalette.setColor(QPalette.Window, QColor(53, 53, 53))
-            darkPalette.setColor(QPalette.WindowText, Qt.white)
-            darkPalette.setColor(QPalette.Base, QColor(25, 25, 25))
-            darkPalette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
-            darkPalette.setColor(QPalette.ToolTipBase, Qt.darkGray)
-            darkPalette.setColor(QPalette.ToolTipText, Qt.white)
-            darkPalette.setColor(QPalette.Text, Qt.white)
-            darkPalette.setColor(QPalette.Button, QColor(53, 53, 53))
-            darkPalette.setColor(QPalette.ButtonText, Qt.white)
-            darkPalette.setColor(QPalette.BrightText, Qt.red)
-            darkPalette.setColor(QPalette.Link, QColor(42, 130, 218))
-            darkPalette.setColor(QPalette.Highlight, QColor(42, 130, 218))
-            darkPalette.setColor(QPalette.HighlightedText, Qt.black)
+            # Check if use_custom_theme is defined
+            try:
+                site_settings.use_custom_theme
+            except AttributeError:
+                site_settings.use_custom_theme = False
 
-            darkPalette.setColor(QPalette.Disabled, QPalette.Window, Qt.lightGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.WindowText, Qt.gray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.Base, Qt.darkGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.ToolTipBase, Qt.darkGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.ToolTipText, Qt.white)
-            darkPalette.setColor(QPalette.Disabled, QPalette.Text, Qt.gray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.Button, QColor(73, 73, 73))
-            darkPalette.setColor(QPalette.Disabled, QPalette.ButtonText, Qt.lightGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.BrightText, Qt.lightGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.Highlight, Qt.lightGray)
-            darkPalette.setColor(QPalette.Disabled, QPalette.HighlightedText, Qt.gray)
+            # If the Assets directory is not bound, then you can't use a custom theme
+            if not os.path.isdir("Assets"):
+                logger.info(
+                    "The Assets directory is not bound, cannot use custom themes,"
+                    "default theme will be used."
+                )
+                site_settings.use_custom_theme = False
 
-            QApplication.setStyle(QStyleFactory.create("Fusion"))
-            QApplication.setPalette(darkPalette)
+            if site_settings.use_custom_theme:
+                # Check if Assets directory exists/is bound
+                logger.debug("The Assets directory is bound correctly")
+                try:
+                    with open(
+                        os.path.realpath(f"Assets/{site_settings.theme}"), "r"
+                    ) as f:
+                        style_sheet = f.read()
+
+                # If theme variable is not defined then use default theme
+                except AttributeError:
+                    logger.info("Using default theme")
+                    with open(os.path.realpath("Assets/ElegantDark.qss"), "r") as f:
+                        style_sheet = f.read()
+
+                # If there is a typo or user attempts to use theme that is not defined, set default theme
+                except FileNotFoundError:
+                    logger.warning(
+                        "Theme file not found, please confirm theme is in the Gui/Assets directory"
+                    )
+                    with open(os.path.realpath("Assets/ElegantDark.qss"), "r") as f:
+                        style_sheet = f.read()
+                finally:
+                    logger.debug("Setting StyleSheetPropagation")
+                    QApplication.setAttribute(
+                        Qt.AA_UseStyleSheetPropagationInWidgetStyles
+                    )
+                    QApplication.instance().setStyleSheet(style_sheet)
+
+            # If Assets directory is not bound (ie. someone has not edited their
+            # run_docker script) then manually set theme to dark mode.
+            else:
+                logger.info("Using default theme")
+                darkPalette = QPalette()
+                darkPalette.setColor(QPalette.Window, QColor(53, 53, 53))
+                darkPalette.setColor(QPalette.WindowText, Qt.white)
+                darkPalette.setColor(QPalette.Base, QColor(25, 25, 25))
+                darkPalette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+                darkPalette.setColor(QPalette.ToolTipBase, Qt.darkGray)
+                darkPalette.setColor(QPalette.ToolTipText, Qt.white)
+                darkPalette.setColor(QPalette.Text, Qt.white)
+                darkPalette.setColor(QPalette.Button, QColor(53, 53, 53))
+                darkPalette.setColor(QPalette.ButtonText, Qt.white)
+                darkPalette.setColor(QPalette.BrightText, Qt.red)
+                darkPalette.setColor(QPalette.Link, QColor(42, 130, 218))
+                darkPalette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+                darkPalette.setColor(QPalette.HighlightedText, Qt.black)
+
+                darkPalette.setColor(QPalette.Disabled, QPalette.Window, Qt.lightGray)
+                darkPalette.setColor(QPalette.Disabled, QPalette.WindowText, Qt.gray)
+                darkPalette.setColor(QPalette.Disabled, QPalette.Base, Qt.darkGray)
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.ToolTipBase, Qt.darkGray
+                )
+                darkPalette.setColor(QPalette.Disabled, QPalette.ToolTipText, Qt.white)
+                darkPalette.setColor(QPalette.Disabled, QPalette.Text, Qt.gray)
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.Button, QColor(73, 73, 73)
+                )
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.ButtonText, Qt.lightGray
+                )
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.BrightText, Qt.lightGray
+                )
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.Highlight, Qt.lightGray
+                )
+                darkPalette.setColor(
+                    QPalette.Disabled, QPalette.HighlightedText, Qt.gray
+                )
+
+                QApplication.setStyle(QStyleFactory.create("Fusion"))
+                QApplication.setPalette(darkPalette)
         else:
             print("This GUI supports Win/Linux/MacOS only")
         self.show()
 
     def initLog(self):
         for index, firmwareName in enumerate(site_settings.FC7List.keys()):
-
             LogFileName = "{0}/Gui/.{1}.log".format(
                 os.environ.get("GUI_dir"), firmwareName
             )
@@ -147,7 +211,7 @@ class QtApplication(QWidget):
                 logFile = open(LogFileName, "w")
                 self.LogList[index] = LogFileName
                 logFile.close()
-            except:
+            except OSError:
                 QMessageBox(
                     None, "Error", "Can not create log files: {}".format(LogFileName)
                 )
@@ -181,11 +245,8 @@ class QtApplication(QWidget):
 
         HostLabel = QLabel("HostName:")
 
-        if self.expertMode == False:
+        if not self.expertMode:
             self.HostName = QComboBox()
-            # self.HostName.addItems(DBServerIP.keys())
-            self.HostName.addItems(settings.dblist)
-            self.HostName.currentIndexChanged.connect(self.changeDBList)
             HostLabel.setBuddy(self.HostName)
         else:
             HostLabel.setText("HostIPAddr")
@@ -195,10 +256,8 @@ class QtApplication(QWidget):
             self.HostEdit.setMaximumWidth(260)
             self.HostEdit.setMaximumHeight(30)
 
-        DatabaseLabel = QLabel("Database:")
-        if self.expertMode == False:
+        if not self.expertMode:
             self.DatabaseCombo = QComboBox()
-            # self.DBNames = DBNames['All']
             self.DBNames = self.HostName.currentText() + ".All_list"
             self.DatabaseCombo.addItem(self.DBNames)
             self.DatabaseCombo.setCurrentIndex(0)
@@ -269,16 +328,6 @@ class QtApplication(QWidget):
         self.mainLayout.addWidget(self.LoginGroupBox, 0, 0)
         self.mainLayout.addWidget(self.LogoGroupBox, 2, 0)
 
-    def changeDBList(self):
-        try:
-            # self.DBNames = DBNames[str(self.HostName.currentText())]
-            self.DBNames = eval(self.HostName.currentText() + ".DBName")
-            self.DatabaseCombo.clear()
-            self.DatabaseCombo.addItems(self.DBNames)
-            self.DatabaseCombo.setCurrentIndex(0)
-        except:
-            print("Unable to change database")
-
     def switchMode(self):
         if self.expertMode:
             self.expertMode = False
@@ -292,36 +341,40 @@ class QtApplication(QWidget):
         self.LoginGroupBox.deleteLater()
 
     def checkLogin(self):
-        expert_string = '_*'
-        if self.UsernameEdit.text() not in ['local', 'localexpert']:
+        expert_string = "_*"
+        if self.UsernameEdit.text() not in ["local", "localexpert"]:
             print("Connecting to Panthera...")
             credentials = {
-                'username': self.UsernameEdit.text()[0:-(len(expert_string))] if self.UsernameEdit.text().endswith(expert_string) else self.UsernameEdit.text(),
-                'userpass': self.PasswordEdit.text()
+                "username": self.UsernameEdit.text()[0 : -(len(expert_string))]
+                if self.UsernameEdit.text().endswith(expert_string)
+                else self.UsernameEdit.text(),
+                "userpass": self.PasswordEdit.text(),
             }
-            
+
             status, message, data = get_accountInfo(*credentials.values())
             if not status:
                 msg = QMessageBox()
-                msg.information(
-                    None, "Error", message, QMessageBox.Ok
-                )
+                msg.information(None, "Error", message, QMessageBox.Ok)
                 return
-            
-            self.username = credentials['username']
-            self.password = credentials['userpass']
-            self.operator_name_first = data['name_first']
-            self.operator_name = data['name_first'] + " " + data['name_last']
-            self.database_connected = True
-            
-            if data['privilege'] in ['Leader', 'Conductor', 'Admin'] or self.operator_name == "Daniel Ziabicki":
-                if self.UsernameEdit.text().endswith('_*'):
+
+            self.username = credentials["username"]
+            self.password = credentials["userpass"]
+            self.operator_name_first = data["name_first"]
+            self.operator_name = data["name_first"] + " " + data["name_last"]
+            self.panthera_connected = True
+            self.purdue_connected = self.checkPurdueConnection()
+
+            if (
+                data["privilege"] in ["Leader", "Conductor", "Admin", "Shifter"]
+                or self.operator_name == "Daniel Ziabicki"
+            ):  # FIXME 'Shifter' needs to be removed from this list once the TEPX and TBPX databases exist.
+                if self.UsernameEdit.text().endswith("_*"):
                     self.expertMode = False
                 else:
                     self.expertMode = True
             else:
                 self.expertMode = False
-            
+
             self.destroyLogin()
             if self.expertMode:
                 logger.debug("Entering Expert GUI")
@@ -332,17 +385,18 @@ class QtApplication(QWidget):
                 logger.debug("Entering Simplified GUI")
                 self.createSimplifiedMain()
         else:
-            if self.UsernameEdit.text().split('_')[0] == 'local':
+            if self.UsernameEdit.text().split("_")[0] == "local":
                 self.expertMode = False
-            elif self.UsernameEdit.text().split('_')[0] == 'localexpert':
+            elif self.UsernameEdit.text().split("_")[0] == "localexpert":
                 self.expertMode = True
-            
-            self.username = self.UsernameEdit.text().split('_')[0]
+
+            self.username = self.UsernameEdit.text().split("_")[0]
             self.password = ""
             self.operator_name = "Local User"
             self.operator_name_first = "Local User"
-            self.database_connected = False
-            
+            self.panthera_connected = False
+            self.purdue_connected = self.checkPurdueConnection()
+
             self.destroyLogin()
             if self.expertMode:
                 logger.debug("Entering Expert GUI")
@@ -352,6 +406,31 @@ class QtApplication(QWidget):
                 logger.debug("FwDict: {}".format(self.FwDict))
                 logger.debug("Entering Simplified GUI")
                 self.createSimplifiedMain()
+
+    def checkPurdueConnection(self):
+        status = False
+        message = ""
+        try:
+            response = requests.get(
+                "https://www.physics.purdue.edu/cmsfpix/Phase2_Test/w.php?sn="
+            )
+            status = response.status_code == 200
+            if not status:
+                message = f"Server responded with status code {response.status_code}"
+        except requests.RequestException as e:
+            logger.error(f"An error occurred: {e}")
+            message = f"An error occurred: {e}"
+            status = False
+
+        if not status:
+            msg = QMessageBox()
+            msg.information(
+                None,
+                "Error",
+                f"There was an issue connecting to the Purdue database, please check your internet connection.\nMessage: {message}",
+                QMessageBox.Ok,
+            )
+        return status
 
     ###############################################################
     ##  Login page and related functions  (END)
@@ -371,23 +450,19 @@ class QtApplication(QWidget):
     ###############################################################
     ##  Main page and related functions
     ###############################################################
+    def create_status_label(self, text, is_connected):
+        label = QLabel(f"{text}")
+        status_label = QLabel("Connected" if is_connected else "Not Connected")
+        status_label.setStyleSheet(f"color: {'green' if is_connected else 'red'}")
+        return label, status_label
 
     def createMain(self):
         self.FirmwareStatus = QGroupBox("Hello, {}!".format(self.operator_name_first))
         self.FirmwareStatus.setDisabled(True)
 
-        DBStatusLabel = QLabel()
-        DBStatusLabel.setText("Database:")
-        DBStatusValue = QLabel()
-        if self.database_connected:
-            DBStatusValue.setText("Connected")
-            DBStatusValue.setStyleSheet("color: green")
-        else:
-            DBStatusValue.setText("Not Connected")
-            DBStatusValue.setStyleSheet("color: red")
-
-        self.StatusList = []
-        self.StatusList.append([DBStatusLabel, DBStatusValue])
+        self.StatusList = [
+            self.create_status_label("Panthera DB", self.panthera_connected),
+        ]
 
         try:
             for firmwareName, ipaddress in site_settings.FC7List.items():
@@ -399,13 +474,12 @@ class QtApplication(QWidget):
                 BeBoard = QtBeBoard(
                     BeBoardID=str(len(self.FwDict)),
                     boardName=firmwareName,
-                    ipAddress=ipaddress
+                    ipAddress=ipaddress,
                 )
                 self.FwDict[firmwareName] = BeBoard
         except Exception as err:
             print("Failed to list the firmware: {}".format(repr(err)))
-        logger.debug("Setup FC7s with the following FC7:\n"
-                     f"{self.FwDict}") 
+        logger.debug(f"Setup FC7s with the following FC7:\n{self.FwDict}")
 
         self.UseButtons = []
 
@@ -446,22 +520,21 @@ class QtApplication(QWidget):
                 FPGAConfigButton.clicked.connect(
                     lambda state, x="{0}".format(index - 1): self.setuDTCFw(x)
                 )
-                #StatusLayout.addWidget(FPGAConfigButton, index, 4, 1, 1)
+
                 SolutionButton = QPushButton("&Firmware Status")
                 SolutionButton.clicked.connect(
                     lambda state, x="{0}".format(index - 1): self.showCommentFw(x)
                 )
-                #StatusLayout.addWidget(SolutionButton, index, 5, 1, 1)
+
                 LogButton = QPushButton("&Log")
                 LogButton.clicked.connect(
                     lambda state, x="{0}".format(index - 1): self.showLogFw(x)
                 )
-                #StatusLayout.addWidget(LogButton, index, 6, 1, 1)
+
                 logger.debug("Setup FC7 Buttons")
         if self.ActiveFC7s != {}:
             for index in self.ActiveFC7s.keys():
                 self.occupyFw("{0}".format(index))
-
 
         self.FirmwareStatus.setLayout(StatusLayout)
         self.FirmwareStatus.setDisabled(False)
@@ -472,7 +545,9 @@ class QtApplication(QWidget):
         if site_settings.icicle_instrument_setup is None:
             self.DefaultButton.setEnabled(False)
 
-        self.DefaultButton.clicked.connect(self.connect_devices)
+        self.Wheel = LoadingWheel()
+
+        self.DefaultButton.clicked.connect(self.connect_devices_starter)
 
         self.reset_devices = QPushButton("&Reconnect all devices")
         self.reset_devices.clicked.connect(self.reconnectDevices)
@@ -480,9 +555,11 @@ class QtApplication(QWidget):
         self.default_checkbox.setChecked(True)
 
         self.DefaultLayout.addWidget(self.DefaultButton)
+        self.Wheel.setVisible(False)
+        self.DefaultLayout.addWidget(self.Wheel)
         self.DefaultLayout.addStretch(1)
         self.UseDefaultGroup.setLayout(self.DefaultLayout)
-        
+
         logger.debug("About to setup HV and LV")
 
         self.HVPowerGroup = QGroupBox("HV Power")
@@ -491,22 +568,24 @@ class QtApplication(QWidget):
         self.HVPortLabel = QLabel()
         self.HVPortLabel.setText("HV Port:")
         self.HVPortName = QLabel()
-        #self.HVPortName.setStyleSheet("color: green")
-
 
         self.HVDeviceLabel = QLabel()
         self.HVDeviceLabel.setText("HV Device:")
         self.HVDeviceName = QLabel()
-        #if site_settings.icicle_instrument_setup is not None:
-        if not site_settings.manual_powersupply_control: 
+
+        if not site_settings.manual_powersupply_control:
             HVDevices = []
-            for device_name, device in site_settings.icicle_instrument_setup['instrument_dict'].items():
+            for device_name, device in site_settings.icicle_instrument_setup[
+                "instrument_dict"
+            ].items():
                 if "hv" in device_name:
                     HVDevices.append(device)
             HVPorts = []
             for device in HVDevices:
-                HVPorts.append(device['resource'])
-            self.HVDeviceName.setText(" | ".join([device['class'] for device in HVDevices]))
+                HVPorts.append(device["resource"])
+            self.HVDeviceName.setText(
+                " | ".join([device["class"] for device in HVDevices])
+            )
             self.HVPortName.setText(" | ".join(HVPorts))
         else:
             self.HVPortName.setText("")
@@ -515,16 +594,14 @@ class QtApplication(QWidget):
         self.HVPowerStatusValue = QLabel()
         logger.debug("Setup HV")
 
-
-        self.HVPowerLayout.addWidget(self.HVDeviceLabel,0,0,1,1)
-        self.HVPowerLayout.addWidget(self.HVDeviceName,0,1,1,1)
-        self.HVPowerLayout.addWidget(self.HVPortLabel,1,0,1,1)
-        self.HVPowerLayout.addWidget(self.HVPortName,1,1,1,1)
+        self.HVPowerLayout.addWidget(self.HVDeviceLabel, 0, 0, 1, 1)
+        self.HVPowerLayout.addWidget(self.HVDeviceName, 0, 1, 1, 1)
+        self.HVPowerLayout.addWidget(self.HVPortLabel, 1, 0, 1, 1)
+        self.HVPowerLayout.addWidget(self.HVPortName, 1, 1, 1, 1)
 
         self.HVPowerGroup.setLayout(self.HVPowerLayout)
 
         logger.debug("Added HV widgets")
-
 
         self.LVPowerGroup = QGroupBox("LV Power")
         self.LVPowerGroup.setDisabled(False)
@@ -534,151 +611,136 @@ class QtApplication(QWidget):
         self.LVPortLabel.setText("LV Port:")
         self.LVPortName = QLabel()
 
-
         logger.debug("Setup LV")
         self.LVDeviceLabel = QLabel()
         self.LVDeviceLabel.setText("LV Device:")
         self.LVDeviceName = QLabel()
         self.LVPowerStatusValue = QLabel()
-        
-        #if site_settings.icicle_instrument_setup is not None: 
+
         if not site_settings.manual_powersupply_control:
             LVDevices = []
-            for device_name, device in site_settings.icicle_instrument_setup['instrument_dict'].items():
+            for device_name, device in site_settings.icicle_instrument_setup[
+                "instrument_dict"
+            ].items():
                 if "lv" in device_name:
                     LVDevices.append(device)
             LVPorts = []
             for device in LVDevices:
-                LVPorts.append(device['resource'])
-            self.LVDeviceName.setText(" | ".join([device['class'] for device in LVDevices]))
+                LVPorts.append(device["resource"])
+            self.LVDeviceName.setText(
+                " | ".join([device["class"] for device in LVDevices])
+            )
             self.LVPortName.setText(" | ".join(LVPorts))
         else:
             self.LVPortName.setText("")
             self.LVDeviceName.setText("Manual LV Control")
 
-        self.LVPowerLayout.addWidget(self.LVDeviceLabel,0,0,1,1)
-        self.LVPowerLayout.addWidget(self.LVDeviceName,0,1,1,1)
-        self.LVPowerLayout.addWidget(self.LVPortLabel,1,0,1,1,)
-        self.LVPowerLayout.addWidget(self.LVPortName,1,1,1,1)
+        self.LVPowerLayout.addWidget(self.LVDeviceLabel, 0, 0, 1, 1)
+        self.LVPowerLayout.addWidget(self.LVDeviceName, 0, 1, 1, 1)
+        self.LVPowerLayout.addWidget(
+            self.LVPortLabel,
+            1,
+            0,
+            1,
+            1,
+        )
+        self.LVPowerLayout.addWidget(self.LVPortName, 1, 1, 1, 1)
         self.LVPowerGroup.setLayout(self.LVPowerLayout)
         logger.debug("setup LV and HV devices")
-        
-        self.relay_group = QGroupBox("Relay Box")
-        self.relay_group.setDisabled(True)
-        relay_layout = QGridLayout()
-        self.relay_board_port_label = QLabel()
-        self.relay_board_port_label.setText("Relay Port:")
-        self.relay_board_port_name = QLabel()
-        
-        self.relay_device_label = QLabel()
-        self.relay_device_label.setText("Relay Device:")
-        self.relay_device_name = QLabel()
 
-        #if site_settings.icicle_instrument_setup is not None: 
-        if not site_settings.manual_powersupply_control:
-            if 'relay_board' in site_settings.icicle_instrument_setup['instrument_dict'].keys():
-                self.relay_device_name.setText('{0}'.format(
-                    site_settings.icicle_instrument_setup['instrument_dict']['relay_board']['class']
-                ))
-                self.relay_board_port_name.setText('{0}'.format(
-                    site_settings.icicle_instrument_setup['instrument_dict']['relay_board']['resource']
-                ))
+        if (
+            "relay_board"
+            in site_settings.icicle_instrument_setup["instrument_dict"].keys()
+        ):
+            self.relay = True
+
+            self.relay_group = QGroupBox("Relay Box")
+            self.relay_group.setDisabled(True)
+            relay_layout = QGridLayout()
+            self.relay_board_port_label = QLabel()
+            self.relay_board_port_label.setText("Relay Port:")
+            self.relay_board_port_name = QLabel()
+
+            self.relay_device_label = QLabel()
+            self.relay_device_label.setText("Relay Device:")
+            self.relay_device_name = QLabel()
+
+            if not site_settings.manual_powersupply_control:
+                self.relay_device_name.setText(
+                    "{0}".format(
+                        site_settings.icicle_instrument_setup["instrument_dict"][
+                            "relay_board"
+                        ]["class"]
+                    )
+                )
+                self.relay_board_port_name.setText(
+                    "{0}".format(
+                        site_settings.icicle_instrument_setup["instrument_dict"][
+                            "relay_board"
+                        ]["resource"]
+                    )
+                )
                 self.relay_group.setDisabled(False)
             else:
-                self.relay_device_name.setText('No relay board device specified.')
-                self.relay_board_port_name.setText('No relay board connection specified.')
-        else:
-            self.relay_device_name.setText("Manual Relay Control")
-            self.relay_board_port_name.setText("")
+                self.relay_device_name.setText("Manual Relay Control")
+                self.relay_board_port_name.setText("")
 
-        self.relay_model_status = QLabel()
-        #self.relay_remote_control = QCheckBox("Use relay")
-        #self.relay_remote_control.setChecked(False)
-        #self.relay_remote_control.toggled.connect(lambda: self.enableDevice("relay"))
-        #self.relay_port_combobox.activated.connect(
-        #    lambda: self.update_instrument_info(
-        #        "relay_board_resource", self.relay_port_combobox.currentText()
-        #    )
-        #)
-        #self.relay_model_combo.activated.connect(
-        #    lambda: self.update_instrument_info(
-        #        "relay_board", self.relay_model_combo.currentText()
-        #    )
-        #)
-        #self.relay_remote_control.toggled.connect(
-        #    lambda: self.relay_group.setDisabled(False)
-        #    if self.relay_remote_control.isChecked()
-        #    else self.relay_group.setDisabled(True)
-        #)
+            self.relay_model_status = QLabel()
 
-        relay_layout.addWidget(self.relay_board_port_label,1,0,1,1)
-        relay_layout.addWidget(self.relay_board_port_name,1,1,1,1)
-        relay_layout.addWidget(self.relay_device_label,0,0,1,1)
-        relay_layout.addWidget(self.relay_device_name,0,1,1,1)
-        #relay_layout.addWidget(self.relay_model_status)
-        #relay_layout.addStretch(1)
-        self.relay_group.setLayout(relay_layout)
+            relay_layout.addWidget(self.relay_board_port_label, 1, 0, 1, 1)
+            relay_layout.addWidget(self.relay_board_port_name, 1, 1, 1, 1)
+            relay_layout.addWidget(self.relay_device_label, 0, 0, 1, 1)
+            relay_layout.addWidget(self.relay_device_name, 0, 1, 1, 1)
+            self.relay_group.setLayout(relay_layout)
 
-        self.multimeter_group = QGroupBox("Multimeter")
-        self.multimeter_group.setDisabled(True)
-        multimeter_layout = QGridLayout()
-        self.multimeter_port_label = QLabel()
-        self.multimeter_port_label.setText("Multimeter Port")
-        self.multimeter_port_name = QLabel()
-        
-        #self.multimeter_port_combobox = QComboBox()
-        #self.multimeter_port_combobox.addItems(self.available_visa_resources)
-        self.multimeter_device_label = QLabel()
-        self.multimeter_device_label.setText("Multimeter Device:")
-        self.multimeter_device_name = QLabel()
-        #if site_settings.icicle_instrument_setup is not None: 
-        if not site_settings.manual_powersupply_control:
-            if 'multimeter' in site_settings.icicle_instrument_setup['instrument_dict'].keys():
-                self.multimeter_device_name.setText('{0}'.format(
-                    site_settings.icicle_instrument_setup['instrument_dict']['multimeter']['class']
-                ))
-                self.multimeter_port_name.setText('{0}'.format(
-                    site_settings.icicle_instrument_setup['instrument_dict']['multimeter']['resource']
-                ))
+            self.mainLayout.addWidget(self.relay_group, 3, 0, 1, 1)
+
+        if (
+            "multimeter"
+            in site_settings.icicle_instrument_setup["instrument_dict"].keys()
+        ):
+            self.multimeter = True
+
+            self.multimeter_group = QGroupBox("Multimeter")
+            self.multimeter_group.setDisabled(True)
+            multimeter_layout = QGridLayout()
+            self.multimeter_port_label = QLabel()
+            self.multimeter_port_label.setText("Multimeter Port")
+            self.multimeter_port_name = QLabel()
+
+            self.multimeter_device_label = QLabel()
+            self.multimeter_device_label.setText("Multimeter Device:")
+            self.multimeter_device_name = QLabel()
+
+            if not site_settings.manual_powersupply_control:
+                self.multimeter_device_name.setText(
+                    "{0}".format(
+                        site_settings.icicle_instrument_setup["instrument_dict"][
+                            "multimeter"
+                        ]["class"]
+                    )
+                )
+                self.multimeter_port_name.setText(
+                    "{0}".format(
+                        site_settings.icicle_instrument_setup["instrument_dict"][
+                            "multimeter"
+                        ]["resource"]
+                    )
+                )
                 self.multimeter_group.setDisabled(False)
             else:
-                self.multimeter_device_name.setText('No mulitimeter device specified.')
-                self.multimeter_port_name.setText('No multimeter connection specified.')
-        else:
-            self.multimeter_device_name.setText("Manual multimeter control")
-            self.multimeter_port_name.setText("")
+                self.multimeter_device_name.setText("Manual multimeter control")
+                self.multimeter_port_name.setText("")
 
-        #self.multimeter_model_combo = QComboBox()
-        #self.multimeter_model_combo.addItems(InstrumentCluster.package_map.keys())
-        self.multimeter_status = QLabel()
-        #self.multimeter_remote_control = QCheckBox("Use Multimeter")
-        #self.multimeter_remote_control.setChecked(False)
-        #self.multimeter_remote_control.toggled.connect(
-        #    lambda: self.enableDevice("multimeter")
-        #)
-        #self.multimeter_port_combobox.activated.connect(
-        #    lambda: self.update_instrument_info(
-        #        "multimeter_resource", self.multimeter_port_combobox.currentText()
-        #    )
-        #)
-        #self.multimeter_model_combo.activated.connect(
-        #    lambda: self.update_instrument_info(
-        #        "multimeter", self.multimeter_model_combo.currentText()
-        #    )
-        #)
-        #self.multimeter_remote_control.toggled.connect(
-        #    lambda: self.multimeter_group.setDisabled(False)
-        #    if self.multimeter_remote_control.isChecked()
-        #    else self.multimeter_group.setDisabled(True)
-        #)
+            self.multimeter_status = QLabel()
 
-        multimeter_layout.addWidget(self.multimeter_port_label,1,0,1,1)
-        multimeter_layout.addWidget(self.multimeter_port_name,1,1,1,1)
-        multimeter_layout.addWidget(self.multimeter_device_label,0,0,1,1)
-        multimeter_layout.addWidget(self.multimeter_device_name,0,1,1,1)
-        #multimeter_layout.addWidget(self.multimeter_status)
-        #multimeter_layout.addStretch(1)
-        self.multimeter_group.setLayout(multimeter_layout)
+            multimeter_layout.addWidget(self.multimeter_port_label, 1, 0, 1, 1)
+            multimeter_layout.addWidget(self.multimeter_port_name, 1, 1, 1, 1)
+            multimeter_layout.addWidget(self.multimeter_device_label, 0, 0, 1, 1)
+            multimeter_layout.addWidget(self.multimeter_device_name, 0, 1, 1, 1)
+            self.multimeter_group.setLayout(multimeter_layout)
+
+            self.mainLayout.addWidget(self.multimeter_group, 3, 1, 1, 3)
 
         self.ArduinoGroup = ArduinoWidget()
         self.ArduinoGroup.stop.connect(self.GlobalStop)
@@ -701,7 +763,8 @@ class QtApplication(QWidget):
         self.SummaryButton.setMinimumHeight(kMinimumHeight)
         self.SummaryButton.setMaximumHeight(kMaximumHeight)
         self.SummaryButton.clicked.connect(self.openSummaryWindow)
-        SummaryLabel = QLabel("Statistics of test status")
+        if self.expertMode:
+            self.SummaryButton.setDisabled(False)
 
         self.NewTestButton = QPushButton("&New")
         self.NewTestButton.setDefault(True)
@@ -714,7 +777,7 @@ class QtApplication(QWidget):
         self.NewTestButton.setDisabled(True)
         if self.ActiveFC7s != {}:
             self.NewTestButton.setDisabled(False)
-        if self.ProcessingTest == True:
+        if self.ProcessingTest:
             self.NewTestButton.setDisabled(True)
         NewTestLabel = QLabel("Open new test")
 
@@ -727,7 +790,7 @@ class QtApplication(QWidget):
             True
         )  # FIXME This is to temporarily disable the test until LV can be added.
         self.NewProductionTestButton.clicked.connect(self.openNewProductionTest)
-        NewProductionTestLabel = QLabel("Open production test")
+        # NewProductionTestLabel = QLabel("Open production test")
 
         self.ReviewButton = QPushButton("&Review")
         self.ReviewButton.setMinimumWidth(kMinimumWidth)
@@ -747,44 +810,86 @@ class QtApplication(QWidget):
         self.ReviewModuleEdit.setEchoMode(QLineEdit.Normal)
         self.ReviewModuleEdit.setPlaceholderText("Enter Module ID")
 
-        self.PeltierCooling = Peltier(100)
-        self.PeltierBox = QGroupBox("Peltier Controller", self)
-        self.PeltierLayout = QGridLayout()
-        self.PeltierLayout.addWidget(self.PeltierCooling)
-        self.PeltierBox.setLayout(self.PeltierLayout)
+        self.ThermalTestButton = QPushButton("&Thermal Test")
+        self.ThermalTestButton.setEnabled(True)
+        self.AbortThermalTestButton = QPushButton("&Abort thermal test")
+        self.AbortThermalTestButton.setEnabled(True)
 
+        # To avoid people trying to push the button without a configured
+        # chamber, check if the resource is defined in siteConfig first.
+        # Maybe catching an error isn't the prettiest way to do this
+        # If it is not, disable the button
+        try:
+            site_settings.temp_chamber_resource
+        except AttributeError:
+            self.ThermalTestButton.setEnabled(False)
+            self.AbortThermalTestButton.setEnabled(False)
+
+        self.AbortThermalTestButton.setMinimumWidth(kMinimumWidth)
+        self.AbortThermalTestButton.setMaximumWidth(kMaximumWidth)
+        self.AbortThermalTestButton.setMinimumHeight(kMinimumHeight)
+        self.AbortThermalTestButton.setMaximumHeight(kMaximumHeight)
+        self.AbortThermalTestButton.clicked.connect(self.abortThermalTest)
+
+        self.ThermalTestButton.setMinimumWidth(kMinimumWidth)
+        self.ThermalTestButton.setMaximumWidth(kMaximumWidth)
+        self.ThermalTestButton.setMinimumHeight(kMinimumHeight)
+        self.ThermalTestButton.setMaximumHeight(kMaximumHeight)
+        self.ThermalTestButton.clicked.connect(self.runThermalTest)
+
+        self.ThermalProfileEdit = QLineEdit("")
+        self.ThermalProfileEdit.setEchoMode(QLineEdit.Normal)
+        self.ThermalProfileEdit.setPlaceholderText("Enter Profile Number")
+
+        self.CoolerBox = QGroupBox(f"{site_settings.cooler} Controller", self)
+        self.CoolerLayout = QGridLayout()
+        if site_settings.cooler == "Peltier":
+            self.CoolerLayout.addWidget(Peltier(100))
+        elif site_settings.cooler == "Tessie":
+            self.CoolerLayout.addWidget(Tessie(100))
+        elif site_settings.cooler == "Manual":
+            # Title label (Manual Cooling)
+            title_label = QLabel("MANUAL COOLING")
+            title_label.setFont(QFont("Arial", 16, QFont.Bold))
+            title_label.setStyleSheet("color: gold;")  # Gold text
+            title_label.setAlignment(Qt.AlignCenter)
+
+            subtitle_label = QLabel("⚠ Proceed with Caution ⚠")
+            subtitle_label.setFont(QFont("Arial", 12, QFont.Bold))
+            subtitle_label.setStyleSheet("color: red;")  # Red warning text
+            subtitle_label.setAlignment(Qt.AlignCenter)
+
+            self.CoolerLayout.setRowStretch(0, 1)  # Add stretch at the top
+            self.CoolerLayout.addWidget(
+                title_label, 1, 0, Qt.AlignCenter
+            )  # Centered title
+            self.CoolerLayout.addWidget(
+                subtitle_label, 2, 0, Qt.AlignCenter
+            )  # Centered warning
+            self.CoolerLayout.setRowStretch(3, 1)  # Add stretch at the bottom
+        else:
+            logger.error(
+                'site_settings.cooler is invalid string. Must be "Peltier", "Tessie", or "Manual"'
+            )
+
+        self.CoolerBox.setLayout(self.CoolerLayout)
+        self.mainLayout.addWidget(self.CoolerBox, 4, 0, 3, 1)
         layout = QGridLayout()
         layout.addWidget(self.NewTestButton, 0, 0, 1, 1)
         layout.addWidget(NewTestLabel, 0, 1, 1, 2)
-        #layout.addWidget(self.NewProductionTestButton, 1, 0, 1, 1)
-        #layout.addWidget(NewProductionTestLabel, 1, 1, 1, 2)
-        #layout.addWidget(self.SummaryButton, 2, 0, 1, 1)
-        #layout.addWidget(SummaryLabel, 2, 1, 1, 2)
+
         layout.addWidget(self.ReviewButton, 2, 0, 1, 1)
         layout.addWidget(ReviewLabel, 2, 1, 1, 2)
         layout.addWidget(self.ReviewModuleButton, 3, 0, 1, 1)
         layout.addWidget(self.ReviewModuleEdit, 3, 1, 1, 2)
 
-        ####################################################
-        # Functions for expert mode
-        ####################################################
+        self.ChillerOption = QGroupBox("Chiller", self)
+        self.ChillerLayout = QGridLayout()
+        self.ChillerOption.setLayout(self.ChillerLayout)
 
-        if self.expertMode:
-            self.SummaryButton.setDisabled(False)
-            self.DBConsoleButton = QPushButton("&DB Console")
-            self.DBConsoleButton.setMinimumWidth(kMinimumWidth)
-            self.DBConsoleButton.setMaximumWidth(kMaximumWidth)
-            self.DBConsoleButton.setMinimumHeight(kMinimumHeight)
-            self.DBConsoleButton.setMaximumHeight(kMaximumHeight)
-            self.DBConsoleButton.clicked.connect(self.openDBConsole)
-            self.DBConsoleButton.setDisabled(True)
-            DBConsoleLabel = QLabel("Console for database")
-            layout.addWidget(self.DBConsoleButton, 1, 0, 1, 1)
-            layout.addWidget(DBConsoleLabel, 1, 1, 1, 2)
-
-        ####################################################
-        # Functions for expert mode  (END)
-        ####################################################
+        layout.addWidget(self.ThermalTestButton, 4, 0, 1, 1)
+        layout.addWidget(self.ThermalProfileEdit, 4, 1, 1, 1)
+        layout.addWidget(self.AbortThermalTestButton, 5, 0, 1, 1)
 
         self.MainOption.setLayout(layout)
 
@@ -806,7 +911,6 @@ class QtApplication(QWidget):
             self.RefreshButton.clicked.connect(self.disableBoxs)
             self.RefreshButton.clicked.connect(self.destroyMain)
             self.RefreshButton.clicked.connect(self.reCreateMain)
-            # self.RefreshButton.clicked.connect(self.checkFirmware)
             self.RefreshButton.clicked.connect(self.enableBoxs)
             self.RefreshButton.clicked.connect(self.update)
             self.RefreshButton.clicked.connect(self.setDefault)
@@ -823,7 +927,6 @@ class QtApplication(QWidget):
         # Fixme: more conditions to be added
         if self.ProcessingTest:
             self.ExitButton.setDisabled(True)
-        # self.ExitButton.clicked.connect(QApplication.quit)
         self.ExitButton.clicked.connect(self.close)
         if self.expertMode is False:
             self.AppLayout.addWidget(self.ExpertButton)
@@ -835,45 +938,55 @@ class QtApplication(QWidget):
 
         self.mainLayout.addWidget(self.FirmwareStatus, 0, 0, 1, 1)
         self.mainLayout.addWidget(self.UseDefaultGroup, 1, 0, 1, 1)
-        #self.mainLayout.addWidget(self.HVPowerRemoteControl, 2, 0, 1, 1)
         self.mainLayout.addWidget(self.HVPowerGroup, 2, 0, 1, 1)
-        #self.mainLayout.addWidget(self.LVPowerRemoteControl, 2, 1, 1, 1)
-        self.mainLayout.addWidget(self.LVPowerGroup, 2, 1, 1, 1)
-        #self.mainLayout.addWidget(self.relay_remote_control, 4, 0, 1, 1)
-        self.mainLayout.addWidget(self.relay_group, 3, 0, 1, 1)
-        #self.mainLayout.addWidget(self.multimeter_remote_control, 4, 1, 1, 1)
-        self.mainLayout.addWidget(self.multimeter_group, 3, 1, 1, 1)
-        self.mainLayout.addWidget(self.ArduinoGroup, 5, 1, 1, 1)
-        self.mainLayout.addWidget(self.ArduinoControl, 4, 1, 1, 1)
-        self.mainLayout.addWidget(self.MainOption, 0, 1, 2, 1)
-        self.mainLayout.addWidget(self.PeltierBox, 4, 0, 4, 1)
-        self.mainLayout.addWidget(self.AppOption, 6, 1, 1, 1)
-        self.mainLayout.addWidget(self.LogoGroupBox, 7, 1, 1, 1)
+        self.mainLayout.addWidget(self.LVPowerGroup, 2, 1, 1, 3)
+
+        self.mainLayout.addWidget(self.MainOption, 0, 1, 2, 3)
+
+        self.mainLayout.addWidget(self.LogoGroupBox, 7, 0, 1, 4)
+
+        # Placing in try/except to avoid needing to change siteConfig
+        try:
+            self.MyLauda = LaudaWidget(100)
+            self.ChillerLayout.addWidget(self.MyLauda)
+
+            self.mainLayout.addWidget(self.ChillerOption, 4, 1, 3, 2)
+            self.mainLayout.addWidget(self.ArduinoControl, 4, 3, 1, 1)
+            self.mainLayout.addWidget(self.ArduinoGroup, 5, 3, 1, 2)
+            self.mainLayout.addWidget(self.AppOption, 6, 3, 1, 1)
+        except AttributeError:
+            self.mainLayout.addWidget(self.ArduinoControl, 4, 1, 1, 3)
+            self.mainLayout.addWidget(self.ArduinoGroup, 5, 1, 1, 3)
+            self.mainLayout.addWidget(self.AppOption, 6, 1, 1, 3)
 
         self.setDefault()
 
         # create a dictionary to easily disable groupboxes later
-        self.groupbox_mapping = {
-            "hv": self.HVPowerGroup,
-            "lv": self.LVPowerGroup,
-            "relay": self.relay_group,
-            "multimeter": self.multimeter_group,
-        }
+        self.groupbox_mapping = {"hv": self.HVPowerGroup, "lv": self.LVPowerGroup}
+        if self.relay:
+            self.groupbox_mapping["relay"] = self.relay_group
+        if self.multimeter:
+            self.groupbox_mpaping["multimeter"] = self.multimeter_group
 
     def setDefault(self):
         if self.expertMode is False:
             self.HVPowerGroup.setDisabled(True)
-            # self.HVPowerRemoteControl.setDisabled(True)
             self.LVPowerGroup.setDisabled(True)
-            # self.LVPowerRemoteControl.setDisabled(True)
             self.ArduinoGroup.disable()
             self.ArduinoControl.setDisabled(True)
 
     def update_instrument_info(self, key, info):
         self.connected_device_information[key] = info
 
+    def connect_devices_starter(self):
+        self.Wheel.setVisible(True)
+        self.connect_devices_thread = LoadingThread(self.connect_devices, 50)
+        self.connect_devices_thread.finished.connect(self.Wheel.close)
+        self.connect_devices_thread.timer.timeout.connect(self.Wheel.update_spinner)
+        self.connect_devices_thread.timer.start()
+        self.connect_devices_thread.start()  # Start the thread
+
     def connect_devices(self):
-        
         """
         Use defaults set in siteConfig.py to setup instrument cluster.
         If default_checkbox is not checked change this variable to reflect
@@ -895,7 +1008,7 @@ class QtApplication(QWidget):
                 self.instruments.open()
                 lv_on = False
                 hv_on = False
-                
+
                 for number in self.instruments.get_modules().keys():
                     if self.instruments.status()[number]["hv"]:
                         hv_on = True
@@ -904,22 +1017,21 @@ class QtApplication(QWidget):
                     if self.instruments.status()[number]["lv"]:
                         lv_on = True
                         break
-                
-                if (lv_on or hv_on):
+
+                if lv_on or hv_on:
                     self.instruments.off()
                 if self.expertMode:
                     self.disable_instrument_widgets()
 
             except Exception as e:
                 print("Error:", e)
-                QMessageBox.information(
-                    None, "Error", "Please Check Instrument Connections", QMessageBox.Ok
-                )
+                self.errorMessageBoxSignal.emit("Please Check Instrument Connections")
                 self.instruments = None
 
-        if self.expertMode:                
-            self.ArduinoGroup.setBaudRate(site_settings.defaultSensorBaudRate)
-            self.ArduinoGroup.frozeArduinoPanel()
+        if self.expertMode:
+            if self.ArduinoControl.isChecked():
+                self.ArduinoGroup.setBaudRate(site_settings.defaultSensorBaudRate)
+                self.ArduinoGroup.frozeArduinoPanel()
 
     def disable_instrument_widgets(self):
         """
@@ -929,13 +1041,10 @@ class QtApplication(QWidget):
         """
         self.HVPowerGroup.setDisabled(True)
         self.LVPowerGroup.setDisabled(True)
-        self.relay_group.setDisabled(True)
-        self.multimeter_group.setDisabled(True)
-
-        #self.HVPowerRemoteControl.setDisabled(True)
-        #self.LVPowerRemoteControl.setDisabled(True)
-        #self.relay_remote_control.setDisabled(True)
-        #self.multimeter_remote_control.setDisabled(True)
+        if self.relay:
+            self.relay_group.setDisabled(True)
+        if self.multimeter:
+            self.multimeter_group.setDisabled(True)
 
     def reconnectDevices(self):
         if self.instruments and not site_settings.manual_powersupply_control:
@@ -946,18 +1055,15 @@ class QtApplication(QWidget):
             # of InstrumentCluster(), however, it is at the will of the garbage collector
             self.instruments = None
 
-            #self.HVPowerRemoteControl.setDisabled(False)
-            #self.LVPowerRemoteControl.setDisabled(False)
             self.relay_remote_control.setDisabled(False)
             self.multimeter_remote_control.setDisabled(False)
 
             for instrument, useFlag in self.desired_devices.items():
                 if useFlag and instrument in self.groupbox_mapping:
                     self.groupbox_mapping[instrument].setDisabled(False)
-            
+
         else:
-            logger.info(" You are running in manual mode, reconnecting"
-                        "does nothing")
+            logger.info("You are running in manual mode. Reconnectingdoes nothing")
 
     def reCreateMain(self):
         print("Refreshing the main page")
@@ -977,36 +1083,84 @@ class QtApplication(QWidget):
         self.FirmwareStatus.deleteLater()
         self.UseDefaultGroup.deleteLater()
         self.HVPowerGroup.deleteLater()
-        # self.HVPowerRemoteControl.deleteLater()
         self.LVPowerGroup.deleteLater()
-        # self.LVPowerRemoteControl.deleteLater()
-        self.relay_group.deleteLater()
-        #self.relay_remote_control.deleteLater()
-        self.multimeter_group.deleteLater()
-        #self.multimeter_remote_control.deleteLater()
+        if self.relay:
+            self.relay_group.deleteLater()
+        if self.multimeter:
+            self.multimeter_group.deleteLater()
         self.ArduinoGroup.deleteLater()
         self.ArduinoControl.deleteLater()
-        self.PeltierBox.deleteLater()
+        self.CoolerBox.deleteLater()
         self.MainOption.deleteLater()
+        self.ChillerOption.deleteLater()
         self.AppOption.deleteLater()
         self.LogoGroupBox.deleteLater()
         self.mainLayout.removeWidget(self.FirmwareStatus)
         self.mainLayout.removeWidget(self.HVPowerGroup)
         self.mainLayout.removeWidget(self.UseDefaultGroup)
-        # self.mainLayout.removeWidget(self.HVPowerRemoteControl)
         self.mainLayout.removeWidget(self.LVPowerGroup)
-        # self.mainLayout.removeWidget(self.LVPowerRemoteControl)
-        self.mainLayout.removeWidget(self.relay_group)
-        #self.mainLayout.removeWidget(self.relay_remote_control)
-        self.mainLayout.removeWidget(self.multimeter_group)
-        #self.mainLayout.removeWidget(self.multimeter_remote_control)
+        if self.relay:
+            self.mainLayout.removeWidget(self.relay_group)
+        if self.multimeter:
+            self.mainLayout.removeWidget(self.multimeter_group)
         self.mainLayout.removeWidget(self.ArduinoGroup)
         self.mainLayout.removeWidget(self.ArduinoControl)
-        self.mainLayout.removeWidget(self.PeltierBox)
+        self.mainLayout.removeWidget(self.CoolerBox)
+
         self.mainLayout.removeWidget(self.MainOption)
+        self.mainLayout.removeWidget(self.ChillerOption)
         self.mainLayout.removeWidget(self.AppOption)
         self.mainLayout.removeWidget(self.LogoGroupBox)
         QApplication.closeAllWindows()
+
+    def abortThermalTest(self):
+        """Stop the current profile running on thermal chamber"""
+        temp_chamber = F4TTempChamber(resource=site_settings.temp_chamber_resource)
+        with temp_chamber:
+            temp_chamber.set("CONTROL_PROFILE", "STOP")
+        message_box = QMessageBox()
+        message_box.setText("Profile Aborted")
+        message_box.setStandardButtons(QMessageBox.Ok)
+        message_box.exec()
+
+    def runThermalTest(self):
+        # Verify input of input data:
+        profile_number = self.ThermalProfileEdit.text()
+
+        # Check if this value is an int
+        try:
+            profile_number = int(profile_number)
+        except ValueError:
+            QMessageBox.information(
+                None,
+                "Error",
+                "Please enter a valid profile number. It must be an integer",
+                QMessageBox.Ok,
+            )
+            return
+        # Import icicle module for temperature chamber
+        print(site_settings.temp_chamber_resource)
+        temp_chamber = F4TTempChamber(resource=site_settings.temp_chamber_resource)
+
+        with temp_chamber:
+            temp_chamber.set("SELECT_PROFILE", profile_number)
+            profile_name = temp_chamber.query("SELECT_PROFILE")
+
+        message_box = QMessageBox()
+        message_box.setText(
+            f'Temperature chamberprofile "{profile_name}" has been chosen'
+        )
+        message_box.setInformativeText("Is this the correct profile?")
+        message_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        message_box.setDefaultButton(QMessageBox.Yes)
+        response = message_box.exec()
+
+        if response == QMessageBox.Yes:
+            with temp_chamber:
+                temp_chamber.set("CONTROL_PROFILE", "START")
+
+        if response == QMessageBox.No:
+            return
 
     def openNewProductionTest(self):
         self.ProdTestPage = QtProductionTestWindow(
@@ -1019,9 +1173,11 @@ class QtApplication(QWidget):
 
     def openNewTest(self):
         FwModule = [
-            board_object for firmware, board_object in self.FwDict.items() if firmware in self.ActiveFC7s.values()
+            board_object
+            for firmware, board_object in self.FwDict.items()
+            if firmware in self.ActiveFC7s.values()
         ]
-        print(f'FwModule is: {[board.getBoardName() for board in FwModule]}')
+        print(f"FwModule is: {[board.getBoardName() for board in FwModule]}")
         self.StartNewTest = QtStartWindow(self, FwModule)
 
         self.NewTestButton.setDisabled(True)
@@ -1045,9 +1201,6 @@ class QtApplication(QWidget):
                 None, "Error", "Please enter a valid module ID", QMessageBox.Ok
             )
 
-    def openDBConsole(self):
-        self.StartDBConsole = QtDBConsoleWindow(self)
-
     def releaseHVPowerPanel(self):
         if self.instruments:
             self.instruments.hv_off()
@@ -1056,8 +1209,7 @@ class QtApplication(QWidget):
                 self.HVPowerStatusValue.setText("")
                 self.UseHVPowerSupply.setDisabled(False)
 
-            # with Exception as err:
-            except Exception as err:
+            except Exception:
                 print("HV PowerPanel not released properly")
         else:
             logger.info("You must manually turn off the HV")
@@ -1065,7 +1217,6 @@ class QtApplication(QWidget):
     def enableDevice(self, device):
         """Keep track of whether a device wants to be used"""
         self.desired_devices[device] = 1 if (self.desired_devices[device] == 0) else 0
-
 
     def releaseLVPowerPanel(self):
         if self.instruments:
@@ -1108,9 +1259,7 @@ class QtApplication(QWidget):
                 self.occupyFw("{0}".format(index))
 
     def getFwComment(self, BeBoard: QtBeBoard, fileName):
-        comment, color, verboseInfo = fwStatusParser(
-            BeBoard, fileName
-        )
+        comment, color, verboseInfo = fwStatusParser(BeBoard, fileName)
         return comment, color, verboseInfo
 
     def getIndex(self, element, List2D):
@@ -1137,7 +1286,7 @@ class QtApplication(QWidget):
                 self.CheckButton.setDisabled(True)
                 self.ActiveFC7s[i] = self.StatusList[i + 1][0].text()
             else:
-                #button.setDisabled(True)
+                # button.setDisabled(True)
                 pass
 
     def releaseFw(self, index):
@@ -1176,11 +1325,12 @@ class QtApplication(QWidget):
             firmware.setFPGAConfig(changeuDTCDialog.uDTCFile)
 
         self.checkFirmware()
+
     def releaseProdTestButton(self):
         self.NewProductionTestButton.setDisabled(False)
         self.LogoutButton.setDisabled(False)
         self.ExitButton.setDisabled(False)
-    
+
     def goExpert(self):
         self.expertMode = True
 
@@ -1198,7 +1348,7 @@ class QtApplication(QWidget):
         print("Critical status detected: Emitting Global Stop signal")
         self.globalStop.emit()
         self.instruments.off()
-        if self.expertMode == True:
+        if self.expertMode:
             self.releaseHVPowerPanel()
             self.releaseLVPowerPanel()
 
@@ -1207,12 +1357,16 @@ class QtApplication(QWidget):
     ###############################################################
     def manual_control_warning(self):
         if not self.instruments:
-            QMessageBox.warning(self, "Manual Control",
-                                "You have opted for manual power supply "
-                                "control. If this is incorrect edit "
-                                "icicle_instrument_setup in siteConfig.py. "
-                                "Otherwise, proceed at your own risk",
-                                QMessageBox.Ok)
+            QMessageBox.warning(
+                self,
+                "Manual Control",
+                "You have opted for manual power supply "
+                "control. If this is incorrect edit "
+                "icicle_instrument_setup in siteConfig.py. "
+                "Otherwise, proceed at your own risk",
+                QMessageBox.Ok,
+            )
+
     def closeEvent(self, event):
         reply = QMessageBox.question(
             self,
@@ -1233,7 +1387,12 @@ class QtApplication(QWidget):
                     self.PeltierCooling.shutdown()
                 else:
                     self.SimpleMain.worker.abort_worker()
-                    self.SimpleMain.Peltier.sendCommand(self.SimpleMain.Peltier.createCommand("Power On/Off Write", ["0", "0", "0", "0", "0", "0", "0", "0"]))
+                    self.SimpleMain.Peltier.sendCommand(
+                        self.SimpleMain.Peltier.createCommand(
+                            "Power On/Off Write",
+                            ["0", "0", "0", "0", "0", "0", "0", "0"],
+                        )
+                    )
 
             except Exception as e:
                 logger.error(f"Could not shutdown Peltier: {e}")
@@ -1247,4 +1406,3 @@ class QtApplication(QWidget):
             event.accept()
         else:
             event.ignore()
-        

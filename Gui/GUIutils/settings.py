@@ -1,9 +1,8 @@
 # November 19 2021:  Edited by Matt Joyce.  Added information for Purdue database to DBNames and DBServerIP
 
-import os
 from collections import defaultdict
-#from Gui.siteSettings import *
-#import InnerTrackerTests.TestSequences as TestSequences
+# from Gui.siteSettings import *
+# import InnerTrackerTests.TestSequences as TestSequences
 
 # List of expert users
 ExpertUserList = [
@@ -53,34 +52,6 @@ DBNames = {
 }
 """
 
-# Note: First element of list will be shown as default value
-# Note: The varibale name is same as hostname
-dblist = []
-
-
-class DBServerIP:
-    All = "All"
-    All_list = ["phase2pixel_test", "DBName2", "DBName3"]
-
-    def __init__(self, DBhostname, DBIP, DBName):
-        self.DBhostname = DBhostname
-        self.DBIP = DBIP
-        self.DBName = DBName
-
-
-Central_remote = DBServerIP(
-    "Central_remote", "0.0.0.0", ["phase2pixel_test", "DBName2", "DBName3"]
-)
-dblist.append(Central_remote.DBhostname)
-local = DBServerIP("local", "127.0.0.1", ["SampleDB", "phase2pixel_test"])
-dblist.append(local.DBhostname)
-OSU_remote = DBServerIP("OSU_remote", "128.146.38.1", ["SampleDB", "phase2pixel_test"])
-dblist.append(OSU_remote.DBhostname)
-Purdue_remote = DBServerIP(
-    "Purdue_remote", "cmsfpixdb.physics.purdue.edu", ["cmsfpix_phase2"]
-)
-dblist.append(Purdue_remote.DBhostname)
-
 # Set the IT_uTDC_firmware for test
 FPGAConfigList = {
     "fc7.board.1": "IT-uDTC_L12-KSU-3xQUAD_L8-KSU2xQUAD_x1G28",
@@ -104,58 +75,36 @@ ModuleType = {
 firmware_image = {
     "SCC": {
         "Dev": "SCC_ELE_RD53A_v4-9.bit",
-        "v4-13": "SCC_ELE_RD53A_v4-6.bit",
-        "v4-14": "SCC_ELE_RD53A_v4-6.bit",
     },
     "TFPX RD53A Quad": {
         "Dev": "QUAD_ELE_RD53A_v4-9.bit",
-        "v4-13": "QUAD_ELE_RD53A_v4-6.bit",
-        "v4-14": "QUAD_ELE_RD53A_v4-6.bit",
     },
     "TEPX RD53A Quad": {
         "Dev": "QUAD_ELE_RD53A_v4-9.bit",
-        "v4-13": "QUAD_ELE_RD53A_v4-6.bit",
-        "v4-14": "QUAD_ELE_RD53A_v4-6.bit",
     },
     "TBPX RD53A Quad": {
         "Dev": "QUAD_ELE_RD53A_v4-9.bit",
-        "v4-13": "QUAD_ELE_RD53A_v4-6.bit",
-        "v4-14": "QUAD_ELE_RD53A_v4-6.bit",
     },
     "CROC SCC": {
-        "Dev": "SCC_ELE_CROC_v4-9.bit",
-        "v4-13": "SCC_ELE_CROC_v4-6.bit",
-        "v4-14": "SCC_ELE_CROC_v4-6.bit",
+        "Dev": "SCC_ELE_CROC_v5-0.bit",
     },
     "TFPX CROC 1x2": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
     "TFPX CROC Quad": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
     "TEPX CROC 1x2": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
     "TEPX CROC Quad": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
     "TBPX CROC 1x2": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
     "TBPX CROC Quad": {
-        "Dev": "QUAD_ELE_CROC_v4-9.bit",
-        "v4-13": "QUAD_ELE_CROC_v4-6.bit",
-        "v4-14": "QUAD_ELE_CROC_v4-6.bit",
+        "Dev": "QUAD_ELE_CROC_v5-0.bit",
     },
 }
 
@@ -169,22 +118,23 @@ ModuleLaneMap = {
     "TEPX CROC 1x2": {"0": "0", "2": "2"},
     "TBPX CROC 1x2": {"0": "0", "2": "2"},
     "TFPX CROC Quad": {"2": "12", "1": "13", "0": "14", "3": "15"},
-    "TEPX CROC Quad": {"0": "0", "1": "1", "2": "2", "3": "3"},
+    "TEPX CROC Quad": {"0": "15", "1": "14", "2": "13", "3": "12"},
     "TBPX CROC Quad": {"0": "0", "1": "1", "2": "2", "3": "3"},
 }
 
 ChipMap = {
     "TFPX CROC 1x2": {
-        'VDDD_B': 	'13',
-        'VDDA_B': 	'13',
-        'VDDA_A': 	'12',
-        'VDDD_A': 	'12',
-        'VMUX_B': 	'13',
-        'IMUX_B': 	'13',
-        'VMUX_A': 	'12',
-        'IMUX_A': 	'12',
-        'GND_A':	'12'},
-    }
+        "VDDD_B": "13",
+        "VDDA_B": "13",
+        "VDDA_A": "12",
+        "VDDD_A": "12",
+        "VMUX_B": "13",
+        "IMUX_B": "13",
+        "VMUX_A": "12",
+        "IMUX_A": "12",
+        "GND_A": "12",
+    },
+}
 
 BoxSize = {
     "SCC": 1,
@@ -201,33 +151,28 @@ BoxSize = {
 }
 
 optimizationTestMap = {
-    'thradj':[
-        'DAC_GDAC_M_LIN',
-        'DAC_GDAC_L_LIN',
-        'DAC_GDAC_R_LIN',
-        'Vthreshold_LIN',
+    "thradj": [
+        "DAC_GDAC_M_LIN",
+        "DAC_GDAC_L_LIN",
+        "DAC_GDAC_R_LIN",
+        "Vthreshold_LIN",
     ],
-    'thrmin':[
-        'DAC_GDAC_M_LIN'
-        'DAC_GDAC_L_LIN'
-        'DAC_GDAC_R_LIN'
-        'Vthreshold_LIN'
+    "thrmin": ["DAC_GDAC_M_LINDAC_GDAC_L_LINDAC_GDAC_R_LINVthreshold_LIN"],
+    "threq": [
+        "VCAL_HIGH",
     ],
-    'threq':[
-        'VCAL_HIGH',
+    "gainopt": [
+        "DAC_KRUM_CURR_LIN",
+        "KRUM_CURR_LIN",
     ],
-    'gainopt':[
-        'DAC_KRUM_CURR_LIN',
-        'KRUM_CURR_LIN',
+    "injdelay": [
+        #'TriggerConfig',
+        "LATENCY_CONFIG",
+        "CAL_EDGE_FINE_DELAY",
     ],
-    'injdelay':[
-        'TriggerConfig',
-        'LATENCY_CONFIG',
-        'CAL_EDGE_FINE_DELAY',
-    ],
-    'gendacdac':[
-        'VCAL_HIGH',
-        'CAL_EDGE_FINE_DELAY',
+    "gendacdac": [
+        "VCAL_HIGH",
+        "CAL_EDGE_FINE_DELAY",
     ],
 }
 

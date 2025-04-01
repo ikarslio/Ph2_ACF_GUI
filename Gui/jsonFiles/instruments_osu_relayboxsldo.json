@@ -15,11 +15,19 @@
             "default_current": 3
         },
         "relay_board": {
+<<<<<<< HEAD
            "class": "RelayBoard",
            "resource": "ASRL/dev/ttyUSB0::INSTR",
            "sim": false,
            "default_voltage": 0,
            "default_current": 0
+=======
+            "class": "RelayBoard",
+            "resource": "ASRL/dev/ttyUSB3::INSTR",
+            "sim": false,
+            "default_voltage": 0,
+            "default_current": 0
+>>>>>>> 937c2421c42d06c22e5a618647e21d6de6129960
         }
     },
     "channels_dict":{
